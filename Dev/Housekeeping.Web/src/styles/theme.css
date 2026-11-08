@@ -1,0 +1,1850 @@
+/* Housekeeping — Unified Sister-App Design System (matched with Greenroom Companion) */
+
+:root {
+  /* Mandatory base declaration per dark-mode-toggle guide: never hardcode single scheme on :root */
+  color-scheme: light dark;
+
+  &:has(> head > meta[name="color-scheme"][content="dark"]) {
+    color-scheme: dark;
+  }
+  &:has(> head > meta[name="color-scheme"][content="light"]) {
+    color-scheme: light;
+  }
+
+  /* Sister-App Surface Tokens (unregistered custom properties so light-dark() stays live) */
+  --bg-canvas: light-dark(#f3f5f8, #090e17);
+  --bg-chrome: light-dark(#ffffff, #0e1524);
+  --bg-surface: light-dark(#ffffff, #131c2e);
+  --bg-elevated: light-dark(#f8fafc, #182338);
+  --bg-input: light-dark(#ffffff, #0d1627);
+  --bg-hover: light-dark(#eef2f7, #1d2b45);
+  --bg-selected: light-dark(#e0f2fe, #132f4c);
+
+  /* Typography & Borders */
+  --text-primary: light-dark(#0f172a, #e6edf7);
+  --text-secondary: light-dark(#475569, #94a3b8);
+  --text-muted: light-dark(#64748b, #64748b);
+  --border-subtle: light-dark(#e2e8f0, #1f2d46);
+  --border-strong: light-dark(#cbd5e1, #2c3f61);
+
+  /* Signature Housekeeping Sky-Blue Accent */
+  --accent: light-dark(#0284c7, #38bdf8);
+  --accent-strong: light-dark(#0369a1, #0ea5e9);
+  --accent-soft: light-dark(rgba(2, 132, 199, 0.12), rgba(56, 189, 248, 0.14));
+  --accent-border: light-dark(rgba(2, 132, 199, 0.38), rgba(56, 189, 248, 0.42));
+
+  /* Semantic Status Colors */
+  --ok: light-dark(#059669, #34d399);
+  --ok-soft: light-dark(rgba(5, 150, 105, 0.12), rgba(52, 211, 153, 0.14));
+  --warn: light-dark(#d97706, #fbbf24);
+  --warn-soft: light-dark(rgba(217, 119, 6, 0.12), rgba(251, 191, 36, 0.14));
+  --err: light-dark(#dc2626, #f87171);
+  --err-soft: light-dark(rgba(220, 38, 38, 0.12), rgba(248, 113, 113, 0.15));
+  --purple: light-dark(#7c3aed, #a78bfa);
+  --purple-soft: light-dark(rgba(124, 58, 237, 0.12), rgba(167, 139, 250, 0.16));
+  --greenroom: light-dark(#16a34a, #22c55e);
+
+  /* Shadows & Radius */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 11px;
+  --shadow-card: light-dark(0 1px 3px rgba(15, 23, 42, 0.06), 0 2px 8px rgba(0, 0, 0, 0.28));
+  --shadow-modal: light-dark(0 18px 50px rgba(15, 23, 42, 0.22), 0 20px 60px rgba(0, 0, 0, 0.65));
+
+  /* Font Stacks */
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+  --font-mono: "Cascadia Code", "JetBrains Mono", Consolas, ui-monospace, monospace;
+
+  /* Default Density (Compact — tuned for zero vertical glyph clipping!) */
+  --control-height: 32px;
+  --cell-pad-y: 6px;
+  --cell-pad-x: 9px;
+  --font-base: 13px;
+  --font-small: 11.5px;
+  --card-pad: 14px;
+  --gap-grid: 12px;
+
+  color: var(--text-primary);
+  accent-color: var(--accent);
+}
+
+:root[data-density="compact"] {
+  --control-height: 32px;
+  --cell-pad-y: 5px;
+  --cell-pad-x: 8px;
+  --font-base: 12.5px;
+  --font-small: 11.5px;
+  --card-pad: 12px;
+  --gap-grid: 10px;
+}
+
+:root[data-density="comfortable"] {
+  --control-height: 36px;
+  --cell-pad-y: 8px;
+  --cell-pad-x: 11px;
+  --font-base: 13.5px;
+  --font-small: 12px;
+  --card-pad: 16px;
+  --gap-grid: 14px;
+}
+
+:root[data-density="touch"] {
+  --control-height: 42px;
+  --cell-pad-y: 10px;
+  --cell-pad-x: 12px;
+  --font-base: 14px;
+  --font-small: 12.5px;
+  --card-pad: 18px;
+  --gap-grid: 16px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--font-base);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* App Shell */
+.hk-shell {
+  display: flex;
+  flex-direction: row;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.hk-body-area {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.hk-main {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--gap-grid) 16px 24px;
+}
+
+@media (min-width: 769px) {
+  .hk-mobile-only,
+  .hk-mobile-only-block {
+    display: none !important;
+  }
+}
+
+/* Top Command Bar & Navigation */
+.hk-topbar {
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 14px 0;
+  flex-shrink: 0;
+  z-index: 20;
+}
+
+.hk-topbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+}
+
+.hk-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.hk-brand img {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+.hk-brand-title {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.hk-version-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid var(--accent-border);
+  font-weight: 600;
+}
+
+.hk-drive-strip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.hk-drive-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.hk-drive-pill:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.hk-drive-pill.network {
+  border-color: var(--accent-border);
+}
+
+.hk-drive-pill.offline {
+  border-color: var(--err);
+  background: var(--err-soft);
+  color: var(--err);
+}
+
+.hk-drive-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.hk-drive-dot.warn {
+  background: var(--warn);
+}
+
+.hk-drive-dot.err {
+  background: var(--err);
+}
+
+.hk-nav-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.hk-nav-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: var(--font-base);
+  font-weight: 600;
+  padding: 8px 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.hk-nav-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.hk-nav-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.hk-badge-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 19px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border: 1px solid currentColor;
+}
+
+/* Cards & Grid Layouts */
+.hk-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--card-pad);
+  box-shadow: var(--shadow-card);
+  min-inline-size: 0;
+}
+
+.hk-card + .hk-card {
+  margin-top: var(--gap-grid);
+}
+
+/* Direct .hk-card children inside CSS Grid layouts rely on grid gap — never stagger 2nd+ cards vertically */
+.hk-grid-2 > .hk-card,
+.hk-grid-3 > .hk-card,
+.hk-grid-4 > .hk-card,
+.hk-builder-layout > .hk-card {
+  margin-top: 0;
+}
+
+/* Deferred below-the-fold sections per defer-rendering-heavy-content & interactions-in-complex-layouts */
+.hk-deferred-section {
+  content-visibility: auto;
+  contain-intrinsic-size: auto none auto 240px;
+}
+
+.hk-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.hk-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.hk-card-subtitle {
+  margin: 2px 0 0;
+  font-size: var(--font-small);
+  color: var(--text-secondary);
+}
+
+.hk-info-banner {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-md);
+  padding: 10px 13px;
+  margin-bottom: var(--gap-grid);
+}
+
+.hk-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  margin-bottom: var(--gap-grid);
+  border: 1px solid var(--warn);
+  background: var(--warn-soft);
+}
+
+.hk-alert-banner.err {
+  border-color: var(--err);
+  background: var(--err-soft);
+}
+
+.hk-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--gap-grid);
+}
+
+.hk-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--gap-grid);
+}
+
+.hk-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--gap-grid);
+}
+
+.hk-grid-2 > *,
+.hk-grid-3 > *,
+.hk-grid-4 > *,
+.hk-builder-layout > * {
+  min-inline-size: 0;
+}
+
+/* Controls — explicitly sized with line-height 1.35 + adequate height so descenders NEVER clip! */
+.hk-input,
+.hk-select,
+.hk-textarea {
+  width: 100%;
+  min-height: var(--control-height);
+  padding: 5px 10px;
+  line-height: 1.35;
+  font-family: inherit;
+  font-size: var(--font-base);
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  outline: none;
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.hk-input.mono,
+.hk-textarea.mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.hk-textarea {
+  min-height: 74px;
+  resize: vertical;
+  padding: 8px 10px;
+}
+
+.hk-input:focus,
+.hk-select:focus,
+.hk-textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.hk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: var(--control-height);
+  padding: 4px 11px;
+  font-family: inherit;
+  font-size: var(--font-base);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-primary);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+  transition: background-color 110ms ease, border-color 110ms ease, opacity 110ms ease;
+}
+
+.hk-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.hk-btn:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
+.hk-btn.primary {
+  background: var(--accent-strong);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+.hk-btn.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.hk-btn.success {
+  background: #059669;
+  border-color: #10b981;
+  color: #ffffff;
+}
+
+.hk-btn.purple {
+  background: #6d28d9;
+  border-color: #8b5cf6;
+  color: #ffffff;
+}
+
+.hk-btn.warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.hk-btn.danger {
+  background: #dc2626;
+  border-color: #ef4444;
+  color: #ffffff;
+}
+
+.hk-btn.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.hk-btn.ghost:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
+
+.hk-btn.sm {
+  min-height: calc(var(--control-height) - 4px);
+  padding: 2px 8px;
+  font-size: var(--font-small);
+}
+
+.hk-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+  line-height: 1.35;
+  min-inline-size: 0;
+}
+
+.hk-checkbox-label input[type="checkbox"],
+.hk-checkbox-label input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.hk-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-inline-size: 0;
+}
+
+.hk-field-label {
+  font-size: var(--font-small);
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.hk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-inline-size: 0;
+}
+
+/* Status & Save Pills */
+.hk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  white-space: nowrap;
+}
+
+/* Keep long status/tool-path pills inside card borders across both desktop & mobile */
+.hk-card .hk-pill {
+  max-inline-size: 100%;
+  min-inline-size: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+  border-radius: 13px;
+}
+
+.hk-pill.ok {
+  color: var(--ok);
+  background: var(--ok-soft);
+  border-color: var(--ok);
+}
+
+.hk-pill.warn {
+  color: var(--warn);
+  background: var(--warn-soft);
+  border-color: var(--warn);
+}
+
+.hk-pill.err {
+  color: var(--err);
+  background: var(--err-soft);
+  border-color: var(--err);
+}
+
+.hk-pill.accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+/* Responsive Semantic Tables per responsive-table guide (sticky thead + @container mobile cards) */
+.table-wrapper {
+  overflow: auto;
+  max-inline-size: 100%;
+  container-type: inline-size;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-surface);
+}
+
+.hk-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.hk-table thead {
+  position: sticky;
+  inset-block-start: 0;
+  z-index: 2;
+}
+
+.hk-table th {
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--font-small);
+  font-weight: 700;
+  text-align: left;
+  padding: 8px var(--cell-pad-x);
+  border-bottom: 1px solid var(--border-strong);
+  white-space: nowrap;
+}
+
+.hk-table td {
+  padding: var(--cell-pad-y) var(--cell-pad-x);
+  border-bottom: 1px solid var(--border-subtle);
+  vertical-align: middle;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.hk-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.hk-table tbody tr:hover {
+  background: var(--bg-hover);
+}
+
+.hk-table tbody tr.selected {
+  background: var(--bg-selected);
+}
+
+@container (width < 640px) {
+  .hk-table.stack-mobile,
+  .hk-table.stack-mobile tbody,
+  .hk-table.stack-mobile td {
+    display: block;
+  }
+
+  .hk-table.stack-mobile thead {
+    display: none;
+  }
+
+  .hk-table.stack-mobile tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border-bottom: 1px solid var(--border-strong);
+  }
+
+  .hk-table.stack-mobile tbody tr:last-child {
+    border-bottom: none;
+  }
+
+  .hk-table.stack-mobile td {
+    padding: 0;
+    border-bottom: none;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  .hk-table.stack-mobile td[data-label]::before {
+    content: attr(data-label);
+    font-weight: 700;
+    color: var(--text-secondary);
+    display: block;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 3px;
+  }
+}
+
+/* Native <dialog> Modals per dialog & light-dismiss-a-dialog guides */
+dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgba(5, 10, 20, 0.68);
+  backdrop-filter: blur(3px);
+}
+
+/* Scope display ONLY to dialog[open] so closed dialogs are never forced visible */
+dialog.hk-dialog {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  padding: 0;
+  max-width: min(880px, 95vw);
+  width: 100%;
+  max-height: 90vh;
+  box-shadow: var(--shadow-modal);
+}
+
+dialog.hk-dialog.wide {
+  max-width: min(1120px, 96vw);
+}
+
+dialog.hk-dialog.narrow {
+  max-width: min(500px, 94vw);
+}
+
+dialog.hk-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.hk-dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.hk-dialog-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.hk-dialog-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.hk-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 11px 16px;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border-subtle);
+}
+
+/* Terminal Surface — always dark per component-specific-light-dark-theme guide;
+   definite reactive block-size + nested scroll containment per css-layout §2, §6, §7 */
+.hk-terminal-surface {
+  color-scheme: dark;
+  background: #070b12;
+  color: #e2e8f0;
+  accent-color: #38bdf8;
+  border: 1px solid #1e293b;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  min-block-size: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+}
+
+.hk-terminal-surface.dashboard-single {
+  block-size: clamp(320px, calc(100dvh - 430px), 580px);
+}
+
+.hk-terminal-surface.dashboard-stacked {
+  block-size: clamp(230px, calc((100dvh - 440px) / 2), 340px);
+}
+
+.hk-terminal-surface.drawer-pane {
+  flex: 1 1 0;
+  block-size: 100%;
+  min-block-size: 0;
+}
+
+.hk-terminal-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  background: #0d1422;
+  border-bottom: 1px solid #1e293b;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.hk-terminal-viewport {
+  flex: 1 1 0;
+  min-block-size: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.hk-terminal-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 20px;
+  white-space: pre;
+}
+
+.hk-terminal-line.wrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.hk-log-tag {
+  display: inline-block;
+  min-width: 58px;
+  text-align: center;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 0 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.hk-log-tag.ERROR { background: rgba(248, 113, 113, 0.2); color: #fca5a5; }
+.hk-log-tag.WARN { background: rgba(251, 191, 36, 0.2); color: #fcd34d; }
+.hk-log-tag.SUCCESS { background: rgba(52, 211, 153, 0.2); color: #6ee7b7; }
+.hk-log-tag.WORK { background: rgba(56, 189, 248, 0.2); color: #7dd3fc; }
+.hk-log-tag.HEADER { background: rgba(167, 139, 250, 0.22); color: #c4b5fd; }
+.hk-log-tag.NET { background: rgba(45, 212, 191, 0.2); color: #5eead4; }
+.hk-log-tag.CMD { background: rgba(250, 204, 21, 0.18); color: #fde047; }
+.hk-log-tag.DRY { background: rgba(192, 132, 252, 0.2); color: #d8b4fe; }
+.hk-log-tag.INFO,
+.hk-log-tag.SKIP { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+
+.hk-terminal-cli {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: #0b111d;
+  border-top: 1px solid #1e293b;
+}
+
+.hk-terminal-cli input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f8fafc;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* Global Bottom Status Footer & Ctrl+` Drawer */
+.hk-footer-bar {
+  background: var(--bg-chrome);
+  border-top: 1px solid var(--border-subtle);
+  padding: 5px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.hk-footer-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 54vw;
+}
+
+.hk-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 44px;
+  z-index: 60;
+  padding: 9px 14px;
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  border: 1px solid var(--accent);
+  box-shadow: var(--shadow-modal);
+  font-weight: 600;
+  max-inline-size: calc(100dvw - 32px);
+}
+
+.hk-global-drawer {
+  block-size: clamp(275px, 36dvh, 420px);
+  min-block-size: 0;
+  background: var(--bg-chrome);
+  border-top: 2px solid var(--accent);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+
+/* Progress Bar */
+.hk-progress-track {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.hk-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-strong), var(--accent));
+  transition: width 150ms linear;
+}
+
+/* Two-Pane Job Builder & Master-Detail Split Layouts */
+.hk-builder-layout {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: var(--gap-grid);
+  align-items: start;
+}
+
+.hk-builder-layout.templates-split {
+  grid-template-columns: 270px minmax(0, 1fr);
+}
+
+.hk-builder-layout.reports-split {
+  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.95fr);
+}
+
+.hk-builder-layout.modules-split {
+  grid-template-columns: 420px minmax(0, 1fr);
+}
+
+@media (min-width: 1025px) {
+  .hk-builder-layout.modules-split > .hk-card {
+    position: sticky;
+    inset-block-start: 0;
+  }
+}
+
+.hk-terminal-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+
+.hk-terminal-grid.split-side {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.hk-terminal-grid > * {
+  min-inline-size: 0;
+}
+
+.hk-job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: calc(100vh - 290px);
+  max-block-size: calc(100dvh - 290px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.hk-job-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  cursor: pointer;
+  transition: border-color 110ms ease, background-color 110ms ease;
+}
+
+.hk-job-item:hover {
+  background: var(--bg-hover);
+}
+
+.hk-job-item.active {
+  background: var(--bg-selected);
+  border-color: var(--accent);
+}
+
+/* Sub-tab pill bar (Settings / Reports) */
+.hk-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap-grid);
+}
+
+.hk-subtab {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-family: inherit;
+  font-size: var(--font-small);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.hk-subtab.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Hybrid Path Picker Row */
+.hk-path-picker {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-inline-size: 0;
+}
+
+.hk-path-picker .hk-input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+/* KPI Metric Card */
+.hk-kpi-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px;
+  min-inline-size: 0;
+}
+
+.hk-kpi-value {
+  font-size: 24px;
+  font-weight: 800;
+  line-height: 1.15;
+  margin-top: 4px;
+}
+
+.hk-kpi-status-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Responsive Adaptive Breakpoints (Tablet <= 1024px, Mobile/PWA <= 768px) */
+@media (max-width: 1024px) {
+  .hk-builder-layout,
+  .hk-builder-layout.templates-split,
+  .hk-builder-layout.reports-split,
+  .hk-builder-layout.modules-split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hk-job-list {
+    max-height: 240px;
+    max-block-size: 240px;
+  }
+
+  .hk-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .hk-grid-3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  :root,
+  [data-density='compact'] {
+    --control-height: 36px;
+    --gap-grid: 10px;
+  }
+
+  .hk-desktop-only,
+  .hk-drive-strip.desktop-only {
+    display: none !important;
+  }
+
+  .hk-mobile-only {
+    display: flex;
+  }
+
+  .hk-mobile-only-block {
+    display: block;
+  }
+
+  .hk-btn,
+  .hk-nav-tab,
+  .hk-subtab,
+  .hk-select,
+  .hk-checkbox-label {
+    touch-action: manipulation;
+  }
+
+  /* Prevent iOS Safari WebKit focus auto-zoom while preserving crisp sizing on Android/Desktop */
+  @supports (-webkit-touch-callout: none) {
+    .hk-input,
+    .hk-select,
+    .hk-textarea,
+    .hk-terminal-cli input {
+      font-size: 16px;
+    }
+  }
+
+  /* Compact 2-Row Mobile Topbar + Safe-Area Support */
+  .hk-topbar {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+
+  .hk-mobile-topbar-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 7px 10px;
+  }
+
+  .hk-mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-inline-size: 0;
+    flex: 1 1 auto;
+  }
+
+  .hk-mobile-brand img {
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    flex-shrink: 0;
+  }
+
+  .hk-mobile-brand-schedule {
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .hk-mobile-actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+
+  .hk-mobile-controls-sheet {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 8px 10px 10px;
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-strong);
+    max-block-size: min(68vh, 68dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .hk-mobile-sheet-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .hk-mobile-sheet-grid > .hk-btn,
+  .hk-mobile-sheet-grid > a.hk-btn,
+  .hk-mobile-sheet-grid > .hk-select {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .hk-nav-tabs {
+    padding: 0 8px;
+    gap: 2px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .hk-nav-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hk-nav-tab {
+    padding: 8px 10px;
+    min-height: 38px;
+    font-size: 12.5px;
+  }
+
+  /* Single-row swipeable subtabs for Settings & Reports */
+  .hk-subtabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 3px;
+  }
+
+  .hk-subtabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hk-subtab {
+    flex-shrink: 0;
+    padding: 7px 12px;
+  }
+
+  /* Main Scroll Workspace */
+  .hk-main {
+    padding: 10px max(10px, env(safe-area-inset-right, 10px)) 18px
+      max(10px, env(safe-area-inset-left, 10px));
+    overflow-x: clip;
+  }
+
+  .hk-card {
+    padding: 11px;
+  }
+
+  .hk-card-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .hk-grid-2,
+  .hk-grid-3,
+  .hk-grid-4 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 2-Column Bento KPI Grid on Mobile Dashboard */
+  .hk-grid-4.hk-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .hk-grid-4.hk-kpi-grid > .hk-kpi-card:first-child,
+  .hk-grid-4.hk-kpi-grid > .hk-kpi-card:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+
+  .hk-kpi-card {
+    padding: 10px 12px;
+  }
+
+  .hk-kpi-value {
+    font-size: 19px;
+  }
+
+  .hk-kpi-status-text {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    line-clamp: 2;
+    overflow: clip;
+    word-break: break-word;
+  }
+
+  /* Mobile Quick Switcher & Collapsible Sidebar for Job Builder / Job Queues */
+  .hk-mobile-switcher-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+  }
+
+  .hk-mobile-switcher-bar .hk-select {
+    flex: 1 1 auto;
+    min-inline-size: 0;
+    font-weight: 700;
+  }
+
+  .hk-mobile-collapsible-sidebar.collapsed {
+    display: none;
+  }
+
+  .hk-mobile-flex-input {
+    width: 100% !important;
+    flex: 1 1 150px;
+    min-inline-size: 0 !important;
+  }
+
+  /* Mobile Terminal Ergonomics */
+  .hk-terminal-grid.split-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hk-terminal-surface.dashboard-single {
+    block-size: clamp(270px, calc(100dvh - 250px), 450px);
+  }
+
+  .hk-terminal-surface.dashboard-stacked {
+    block-size: clamp(205px, calc((100dvh - 270px) / 2), 305px);
+  }
+
+  .hk-main .hk-pill {
+    white-space: normal;
+    max-inline-size: 100%;
+    word-break: break-word;
+  }
+
+  .hk-terminal-toolbar {
+    padding: 6px 8px;
+    gap: 5px;
+  }
+
+  .hk-terminal-filter-input {
+    flex: 1 1 70px;
+    width: auto !important;
+    min-inline-size: 62px;
+  }
+
+  .hk-terminal-viewport {
+    padding: 6px 8px;
+    font-size: 11.5px;
+    line-height: 18px;
+  }
+
+  .hk-terminal-line {
+    gap: 5px;
+    min-height: 18px;
+  }
+
+  .hk-log-tag {
+    min-width: 48px;
+    font-size: 9.5px;
+    padding: 0 4px;
+  }
+
+  .hk-terminal-cli {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+
+  .hk-global-drawer {
+    block-size: clamp(285px, 52dvh, 450px);
+    padding: 8px;
+  }
+
+  /* 2-Line Stacked Mobile Status Footer */
+  .hk-footer-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 5px;
+    padding: 6px max(10px, env(safe-area-inset-right, 10px))
+      max(6px, env(safe-area-inset-bottom, 6px))
+      max(10px, env(safe-area-inset-left, 10px));
+  }
+
+  .hk-footer-status-text {
+    max-width: none;
+    flex: 1 1 auto;
+    min-inline-size: 0;
+  }
+
+  .hk-footer-controls-row {
+    justify-content: space-between;
+    width: 100%;
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+
+  /* Mobile Dialog & Toast Positioning */
+  dialog.hk-dialog,
+  dialog.hk-dialog.wide,
+  dialog.hk-dialog.narrow {
+    max-inline-size: calc(100dvw - 12px);
+    max-block-size: min(92vh, 92dvh);
+  }
+
+  .hk-dialog-header {
+    padding: 10px 12px;
+  }
+
+  .hk-dialog-body {
+    padding: 12px;
+    overscroll-behavior: contain;
+  }
+
+  .hk-dialog-footer {
+    padding: 9px 12px;
+    flex-wrap: wrap;
+  }
+
+  .hk-toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(74px + env(safe-area-inset-bottom, 0px));
+    max-inline-size: none;
+  }
+}
+
+/* Tabular Numerals per Standard 15 / UI Parity */
+.hk-kpi-value,
+.hk-table td,
+.hk-pill,
+.hk-badge-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Left Sidebar Rail (Amber #f59e0b) */
+.hk-sidebar-rail {
+  width: 220px;
+  flex-shrink: 0;
+  background: var(--bg-chrome);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  user-select: none;
+  transition: width 0.18s ease-in-out;
+  z-index: 30;
+}
+
+.hk-sidebar-rail.collapsed {
+  width: 56px;
+}
+
+.hk-sidebar-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--border-subtle);
+  overflow: hidden;
+}
+
+.hk-sidebar-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.hk-sidebar-brand-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.hk-sidebar-title {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.hk-sidebar-version {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: #f59e0b;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.hk-sidebar-nav {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 6px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.hk-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  position: relative;
+  transition: background 0.12s, color 0.12s;
+}
+
+.hk-sidebar-rail.collapsed .hk-sidebar-item {
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.hk-sidebar-item:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.hk-sidebar-item.active {
+  background: rgba(245, 158, 11, 0.12);
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.hk-sidebar-item.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #f59e0b;
+}
+
+.hk-sidebar-icon {
+  font-size: 16px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.hk-sidebar-label {
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hk-sidebar-shortcut {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--bg-elevated);
+}
+
+.hk-sidebar-utils {
+  padding: 6px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hk-sidebar-util-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.hk-sidebar-rail.collapsed .hk-sidebar-util-btn {
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.hk-sidebar-util-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.hk-sidebar-util-btn .hk-kbd {
+  margin-left: auto;
+}
+
+.hk-sidebar-drives {
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  font-size: 11px;
+}
+
+.hk-sidebar-drives-title {
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.hk-sidebar-drives-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 130px;
+  overflow-y: auto;
+}
+
+.hk-sidebar-drive-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+
+.hk-sidebar-drive-item .hk-drive-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hk-sidebar-drive-item.ok .hk-drive-dot {
+  background: #10b981;
+}
+
+.hk-sidebar-drive-item.warn .hk-drive-dot {
+  background: #f59e0b;
+}
+
+.hk-sidebar-drive-item.err .hk-drive-dot {
+  background: #ef4444;
+}
+
+.hk-sidebar-drive-item .hk-drive-name {
+  font-weight: 600;
+}
+
+.hk-sidebar-drive-item .hk-drive-space {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.hk-sidebar-footer {
+  padding: 6px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hk-sidebar-toggle-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  width: 100%;
+  text-align: center;
+}
+
+.hk-sidebar-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* Global Omni-Search Modal */
+.hk-omni-search {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hk-omni-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.hk-omni-item {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid transparent;
+}
+
+.hk-omni-item.selected,
+.hk-omni-item:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-subtle);
+}
+
+.hk-omni-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hk-omni-item-sub {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+
+.hk-omni-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.hk-omni-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+
+/* Keyboard Shortcuts Cheat-Sheet */
+.hk-shortcuts-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hk-shortcuts-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hk-shortcuts-title {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #f59e0b;
+  margin: 0;
+}
+
+.hk-shortcuts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hk-shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 2px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.hk-shortcut-desc {
+  font-size: 12.5px;
+  color: var(--text-secondary);
+}
+
+.hk-shortcut-keys {
+  display: flex;
+  gap: 4px;
+}
+
+.hk-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  display: inline-block;
+  line-height: 1.2;
+}
+
+@media (max-width: 768px) {
+  .hk-sidebar-rail {
+    display: none;
+  }
+}

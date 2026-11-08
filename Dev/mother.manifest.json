@@ -1,0 +1,39 @@
+{
+  "schema_version": "1.0",
+  "app_id": "housekeeping",
+  "id": "housekeeping",
+  "display_name": "Housekeeping",
+  "version": "0.1.11",
+  "brand_accent": "#f59e0b",
+  "archetype": "companion_daemon",
+  "app_user_model_id": "StreamItAll.Housekeeping",
+  "port": 5178,
+  "default_port": 5178,
+  "https_port": 8578,
+  "health_endpoint": "/api/v1/system/health",
+  "single_tray_mutex": "Global\\Mother_Supervisor_Active",
+  "managed_env_var": "HOUSEKEEPING_MANAGED_BY_MOTHER",
+  "commands": {
+    "start": ["scripts/start-daemon.bat", "--headless", "--managed-by-mother"],
+    "stop": ["scripts/stop-daemon.bat", "--headless"],
+    "restart": ["scripts/start-daemon.bat", "--headless", "--managed-by-mother"],
+    "status": ["scripts/status-check.bat", "--headless"],
+    "open": ["Housekeeping.exe"],
+    "backup": ["scripts/backup-now.bat"]
+  },
+  "endpoints": {
+    "health": "http://127.0.0.1:5178/api/v1/system/health",
+    "status": "http://127.0.0.1:5178/api/v1/pipeline/state",
+    "telemetry": "http://127.0.0.1:5178/api/v1/system/telemetry",
+    "scheduler_status": "http://127.0.0.1:5178/api/v1/scheduler/status",
+    "scheduler_defer": "http://127.0.0.1:5178/api/v1/scheduler/defer",
+    "shutdown": "http://127.0.0.1:5178/api/v1/system/shutdown"
+  },
+  "paths": {
+    "data_dir": "data",
+    "config_dir": "data",
+    "log_dir": "logs",
+    "crashes_dir": "logs/crashes",
+    "backups_dir": "backups"
+  }
+}

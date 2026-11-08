@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" data-density="compact">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <script>
+      try {
+        document.querySelector('meta[name="color-scheme"]').content =
+          localStorage.getItem('color-scheme') ?? 'light dark';
+        const d = localStorage.getItem('hk-density');
+        if (d === 'compact' || d === 'comfortable' || d === 'touch') {
+          document.documentElement.dataset.density = d;
+        } else if (window.matchMedia && window.matchMedia('(max-width: 767px)').matches) {
+          document.documentElement.dataset.density = 'touch';
+        }
+      } catch (err) {
+        console.debug('Bootstrap theme init skipped:', err);
+      }
+    </script>
+    <meta name="theme-color" content="#090e17" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Housekeeping" />
+    <link rel="icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <title>Housekeeping</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

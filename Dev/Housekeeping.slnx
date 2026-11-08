@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="Housekeeping.Core/Housekeeping.Core.csproj" />
+  <Project Path="Housekeeping.Server/Housekeeping.Server.csproj" />
+  <Project Path="Housekeeping.DesktopHost/Housekeeping.DesktopHost.csproj" />
+  <Project Path="Housekeeping.Tests/Housekeeping.Tests.csproj" />
+</Solution>
