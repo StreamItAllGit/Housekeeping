@@ -1,9 +1,9 @@
 # Housekeeping — Interfaces, REST API, SignalR & File Contracts Manual
 
 - **Document:** `INTERFACES.md` (Technical Manual 4 of 4)
-- **Active Build Version:** `v1.0.0-rc.11-hf.2` (In-Dev Target: `v1.0.0-rc.12`)
+- **Active Build Version:** `v0.1.12` (Universal SemVer `PATCH+1`)
 - **HTTP & SignalR Base URL:** `http://127.0.0.1:5178` (Sandbox: `http://127.0.0.1:15178` · Tailscale Serve HTTPS: `https://<node>.<tailnet>.ts.net`)
-- **Primary Source Anchors:** [`HousekeepingApiEndpoints.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L25-L1675) · [`HousekeepingHub.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hubs/HousekeepingHub.cs#L14-L108) · [`TieredAuthService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Security/TieredAuthService.cs#L17-L396) · [`HashSidecarService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.cs#L425-L803)
+- **Primary Source Anchors:** [`HousekeepingApiEndpoints.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1-L1409) · [`HousekeepingHub.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hubs/HousekeepingHub.cs#L14-L108) · [`TieredAuthService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Security/TieredAuthService.cs#L17-L396) · [`HashSidecarService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.cs#L1-L2727)
 
 ---
 
@@ -27,7 +27,7 @@ All `/api/*` and `/hubs/*` requests pass through [`TieredAuthMiddleware`](file:/
 
 ## 2. Complete REST API Reference (`/api/v1/*` & `/api/*`)
 
-All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L25-L1526). When a request includes header **`X-Target-Node-Id: <remoteNodeId>`** (where `<remoteNodeId>` $\ne$ `"local"`), [`RemoteNodeProxyMiddleware`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Proxy/RemoteNodeProxyMiddleware.cs#L42-L136) forwards the `/api/v1/*` call to that remote Fleet Node's `http://<HostOrIp>:<HttpApiPort>` with `X-Housekeeping-Token` attached.
+All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L25-L1409). When a request includes header **`X-Target-Node-Id: <remoteNodeId>`** (where `<remoteNodeId>` $\ne$ `"local"`), [`RemoteNodeProxyMiddleware`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Proxy/RemoteNodeProxyMiddleware.cs#L42-L136) forwards the `/api/v1/*` call to that remote Fleet Node's `http://<HostOrIp>:<HttpApiPort>` with `X-Housekeeping-Token` attached.
 
 ### 2.1 Health, Mother Fleet Supervision & Graceful Shutdown
 | Method | Route | Source Line | Request / Query | Response Payload & Notes |
@@ -35,7 +35,7 @@ All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](f
 | `GET` | `/api/v1/health` | [`L31-L55`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L31-L55) | Public | `{ status: "healthy", service: "Housekeeping", version, archetype: "2-tray-companion", port, pid, uptimeSeconds, testMode, dryRun, isRunning, activeQueue, activeJob, progressPercent, pendingSwapCount, timestampUtc }` |
 | `GET` | `/api/scheduler/status` | [`L61-L82`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L61-L82) | Auth | `{ service: "Housekeeping", isRunning, isPaused, activeQueueId, activeQueueName, activeJobId, activeJobName, progressPercent, deferredUntilUtc, nextScheduledRunUtc, nextScheduledQueueName, nextRunStatusText, guardedProcessRunning, activeGuardedProcess }` |
 | `POST` | `/api/scheduler/defer` | [`L84-L110`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L84-L110) | `{ "minutes": 30, "reason": "Mother disk arbitration" }` | Defers background schedule evaluation for `minutes` (`0` clears deferral). Returns `{ ok: true, deferredUntilUtc, message }`. |
-| `POST` | `/api/system/shutdown` | [`L112-L135`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L112-L135) | Direct Loopback or `NodeApiToken` (`403` otherwise) | Persists active checkpoint if running, stops pipeline, and calls `IHostApplicationLifetime.StopApplication()` after 150ms. |
+| `POST` | `/api/v1/system/shutdown` (`/api/system/shutdown`) | [`SystemDoctorAndBackup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.SystemDoctorAndBackup.cs) | Direct Loopback or `NodeApiToken` (`403` otherwise) | Invokes `InitiateGracefulShutdownAbort()` (preserving `interrupted_run_checkpoint.json` & `PendingRuns`) and stops Kestrel/STA host after 150ms. |
 
 ### 2.2 Authentication, Tailscale Serve HTTPS & Desktop Window Bridge
 | Method | Route | Source Line | Request Body | Response Payload & Notes |
@@ -70,7 +70,8 @@ All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](f
 | `POST` | `/api/v1/pipeline/run-job` | [`L455-L469`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L455-L469) | `{ jobId, isDryRun, forceCloudResync }` | Starts single job or enqueues in `Up Next`. |
 | `POST` | `/api/v1/pipeline/pause` | [`L471-L476`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L471-L476) | — | Toggles queue pause between steps (`{ isPaused, state }`). |
 | `POST` | `/api/v1/pipeline/suspend` | [`L478-L483`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L478-L483) | — | Freezes/unfreezes active child process threads via `NtSuspendProcess` (`{ isSuspended, state }`). |
-| `POST` | `/api/v1/pipeline/stop` | [`L485-L490`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L485-L490) | — | Cancels active run and clears `Up Next` queue (`{ ok: true, state }`). |
+| `POST` | `/api/v1/pipeline/stop-job` | [`CoexistenceAndControl.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.CoexistenceAndControl.cs) | — | Cancels only the active job (`_activeJobCts`), advances active queue to its next step, and preserves `Up Next` (`{ ok: true, state }`). |
+| `POST` | `/api/v1/pipeline/stop-queue` (`/stop`) | [`CoexistenceAndControl.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.CoexistenceAndControl.cs) | — | Explicit user stop: cancels active run, clears `Up Next` queue, and deletes `interrupted_run_checkpoint.json` (`{ ok: true, state }`). |
 | `POST` | `/api/v1/pipeline/pending-runs/remove` | [`L492-L501`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L492-L501) | `{ "itemKey": "Queue:..." }` | Removes a single item from `Up Next`. |
 | `POST` | `/api/v1/pipeline/pending-runs/clear` | [`L503-L508`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L503-L508) | — | Clears all pending runs (`{ ok: true, cleared, state }`). |
 | `POST` | `/api/v1/pipeline/interrupted/resume` | [`L510-L522`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L510-L522) | `{ "restartFullQueue": bool }` | Resumes remaining jobs (or restarts full queue) from `interrupted_run_checkpoint.json`. |
@@ -113,10 +114,14 @@ All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](f
 | `POST` | `/api/v1/fs/native-pick-folder`, `/native-pick-file` & `/reveal` | [`L1244-L1295`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1244-L1295) | `{ initialPath?, filter? }` / `{ path }` | Opens native Win32 STA folder/file picker or highlights target in `explorer.exe /select` (loopback only). |
 | `GET` | `/api/v1/history` & `/api/v1/history/{index}/log` | [`L1360-L1395`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1360-L1395) | Path `index` | Lists `history.json` entries or reads the per-run log file from `logs\runs\`. |
 | `DELETE` | `/api/v1/history` | [`L1397-L1402`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1397-L1402) | — | Clears `history.json`. |
-| `GET` / `POST` | `/api/v1/greenroom/status` & `/sync` | [`L1408-L1424`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1408-L1424) | `{ sourceModule }` | Probes Greenroom `:8420` or triggers immediate catalog/hash ingestion. |
-| `POST` | `/api/v1/notifications/test-discord` & `/test-toast` | [`L1430-L1448`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1430-L1448) | — | Sends test Discord Rich Embed or Windows tray balloon alert. |
-| `GET` / `POST` | `/api/v1/fleet/nodes`, `/{nodeId}/command`, `/{nodeId}/push-settings` | [`L1454-L1525`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1454-L1525) | `?probe=true` / `{ action }` | Probes remote Fleet Nodes, dispatches `StartQueue`/`StopQueue`/`RestartApp`, or pushes `settings.json` over SMB. |
-| `POST` / `GET` | `/api/v1/doctor/backup` & `/diagnostic-bundle` | [`L1531-L1566`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1531-L1566) | — | Creates `.7z`/`.zip` state backup in `backups\config_snapshots\` or downloads a sanitized JSON diagnostic bundle. |
+| `GET` / `POST` | `/api/v1/greenroom/status` & `/sync` | [`L1250-L1275`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1250-L1275) | `{ sourceModule }` | Probes Greenroom `:8420` or triggers immediate catalog/hash ingestion. |
+| `POST` | `/api/v1/notifications/test-discord` & `/test-toast` | [`L1277-L1300`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1277-L1300) | — | Sends test Discord Rich Embed or Windows tray balloon alert. |
+| `GET` / `POST` | `/api/v1/fleet/nodes`, `/{nodeId}/command`, `/{nodeId}/push-settings` | [`L1302-L1344`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1302-L1344) | `?probe=true` / `{ action }` | Probes remote Fleet Nodes, dispatches `StartQueue`/`StopQueue`/`RestartApp`, or pushes `settings.json` over SMB. |
+| `GET` | `/api/v1/coexistence/status` | [`CoexistenceAndControl.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.CoexistenceAndControl.cs) | — | Returns `CoexistenceStatusDto` (`schemaVersion: 2`, `appId: "housekeeping"`, `peers[]`, `managedRoots[]`, `detectedConflicts[]`, `autoAlignEnabled`). |
+| `POST` | `/api/v1/coexistence/apply-recommendations` | [`CoexistenceAndControl.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.CoexistenceAndControl.cs) | `{ presetId, enableAutoAlign? }` | Creates a config snapshot and applies `"delegate_to_shadowlibrary"`, `"align_placement"`, or `"enable_auto_align"`. |
+| `GET` | `/api/v1/system/doctor/diagnostics` | [`SystemDoctorAndBackup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.SystemDoctorAndBackup.cs) | — | Returns live dependency checks, drive metrics, Tailscale PWA status, and active data/log/snapshot directories. |
+| `POST` / `GET` | `/api/v1/system/doctor/export-bundle` (`/doctor/diagnostic-bundle`) | [`SystemDoctorAndBackup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.SystemDoctorAndBackup.cs) | — | Writes sanitized diagnostic JSON bundle strictly inside `ActiveLogsDir` (`--log-dir`). |
+| `POST` | `/api/v1/system/backup/now` (`/doctor/backup`) | [`SystemDoctorAndBackup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.SystemDoctorAndBackup.cs) | — | Writes clean JSON state-only backup archive into sibling `<InstallRoot>\backups\` via `FileShare.ReadWrite` (excluding `webview2_cache`). |
 
 ---
 
@@ -149,12 +154,14 @@ Housekeeping **does not expose an MCP server (`/mcp`)**. Instead, sister applica
 
 | Script / Binary | Path | Invocation & Purpose |
 | :--- | :--- | :--- |
-| `Housekeeping.exe` | `<InstallRoot>\Housekeeping.exe` | Root clean-layout shim; forwards all arguments to `<InstallRoot>\app\Housekeeping.exe`. |
-| `start.bat` | `<InstallRoot>\scripts\start.bat` | Starts `Housekeeping.exe --minimized` in the background if not already running. |
-| `stop.bat` | `<InstallRoot>\scripts\stop.bat` | Gracefully stops `Housekeeping.exe` and `Housekeeping.Server.exe` via `taskkill /IM`. |
-| `restart.bat` | `<InstallRoot>\scripts\restart.bat` | Calls `stop.bat`, waits 2 seconds, and calls `start.bat`. |
-| `backup-data.bat` | `<InstallRoot>\scripts\backup-data.bat` | Compresses `<InstallRoot>\data\` into `<InstallRoot>\backups\config_snapshots\data_backup_<timestamp>.7z` (or `.zip`). |
-| `launch-ui.bat` | `<InstallRoot>\scripts\interactive\launch-ui.bat` | Launches `Housekeeping.exe` (or restores the active Standalone WebView2 Window via `HOUSEKEEPING_RESTORE_WINDOW`). |
+| `Housekeeping.exe` | `<InstallRoot>\Housekeeping.exe` | Root clean-layout shim; forwards all arguments (including synchronous `--status` & `--repair-config`) to `<InstallRoot>\app\Housekeeping.exe`. |
+| `start-daemon.bat` | `<InstallRoot>\scripts\start-daemon.bat` | Starts `Housekeeping.exe --minimized --data-dir "<Root>\data" --log-dir "<Root>\logs"` in the background. |
+| `stop-daemon.bat` | `<InstallRoot>\scripts\stop-daemon.bat` | Dispatches `POST http://127.0.0.1:5178/api/v1/system/shutdown` (`InitiateGracefulShutdownAbort`, preserving active checkpoints & `PendingRuns`). |
+| `backup-now.bat` | `<InstallRoot>\scripts\backup-now.bat` | Compresses `data\settings.json` & `data\history.json` into `<InstallRoot>\backups\manual_backup_<timestamp>.7z` (or `.zip` fallback). |
+| `status-check.bat` / `--status` | `<InstallRoot>\scripts\status-check.bat` | Synchronous one-shot CLI status check (`HousekeepingCliRunner.RunStatus`); outputs JSON (`version`, `dataDir`, `logsDir`, `daemonReachable`, `configValid`) and exits `0`. |
+| `inspect-status.bat` | `<InstallRoot>\scripts\interactive\inspect-status.bat` | Interactive wrapper invoking `status-check.bat` followed by `pause`. |
+| `repair-config.bat` / `--repair-config` | `<InstallRoot>\scripts\interactive\repair-config.bat` | Synchronous one-shot config validator/healer (`HousekeepingCliRunner.RunRepairConfig`); quarantines corrupt `settings.json` to `.corrupt_<timestamp>.bak`, restores from snapshot/`.bak` or defaults, outputs JSON, and exits `0`. |
+| `tail-logs.bat` | `<InstallRoot>\scripts\interactive\tail-logs.bat` | Streams `<InstallRoot>\logs\Housekeeping_Live.log` live (`Get-Content -Wait -Tail 40`). |
 
 ---
 
@@ -186,26 +193,101 @@ Housekeeping **does not expose an MCP server (`/mcp`)**. Instead, sister applica
   ```
   *Canonical `COMPOSITE_SHA1` Formula:* UTF-8 SHA-1 over sorted lines `"{NormalizedForwardSlashRelPath}|{SizeBytes}|{UPPER_CRC32}\n"` ([`HashSidecarService.cs#L345-L359,L407-L421`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.cs#L345-L359)).
 
-### 6.2 Distributed Transcode Lockfile (`<Target>.hklock`)
-Written by [`NetworkSafetyService.TryAcquireDistributedLock`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.cs#L383-L466):
-```json
-{
-  "MachineName": "MEDIA-WORKSTATION",
-  "UserName": "Stream",
-  "ProcessId": 14820,
-  "AcquiredAtUtc": "2026-11-04T08:15:00Z",
-  "HeartbeatAtUtc": "2026-11-04T08:29:00Z",
-  "TargetFilePath": "V:\\Media\\Movies\\Movie (1080p).mkv"
-}
-```
+### 6.2 Distributed File Lock (`<Target>.hklock`) & Standard 19 Directory Sentinel (`<TargetDir>\.<appId>_<pid>.hklock`)
+- **Per-File Transcode Lock (`<Target>.hklock` via [`NetworkSafetyService.DistributedLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DistributedLocks.cs)):**
+  ```json
+  {
+    "MachineName": "MEDIA-WORKSTATION",
+    "UserName": "Stream",
+    "ProcessId": 14820,
+    "StartedAtUtc": "2026-11-11T08:15:00Z",
+    "HeartbeatAtUtc": "2026-11-11T08:29:00Z",
+    "TargetFilePath": "V:\\Media\\Movies\\Movie (1080p).mkv"
+  }
+  ```
+- **Standard 19 §4 Directory Mutation Sentinel (`<TargetDir>\.<appId>_<pid>.hklock`, `schemaVersion: 1` via [`NetworkSafetyService.DirectoryLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DirectoryLocks.cs) & [`SisterAppCoexistenceModels.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SisterAppCoexistenceModels.cs)):**
+  ```json
+  {
+    "$schema": "https://schemas.local/lockfile.v1.json",
+    "schemaVersion": 1,
+    "lockType": "directory-mutation",
+    "suiteId": "mother",
+    "ownerAppId": "housekeeping",
+    "version": "0.1.12",
+    "pid": 14820,
+    "processStartTimeUtc": "2026-11-11T08:00:00.0000000Z",
+    "hostname": "MEDIA-WORKSTATION",
+    "port": 5178,
+    "operation": "manifest-audit",
+    "targetPath": "V:\\ROMs\\SNES",
+    "acquiredAtUtc": "2026-11-11T08:15:00.0000000Z",
+    "heartbeatAtUtc": "2026-11-11T08:16:00.0000000Z",
+    "expiresAtUtc": "2026-11-11T08:45:00.0000000Z"
+  }
+  ```
 
-### 6.3 Module 4 9-Column ROM Manifest (`collection_manifest.csv`)
-Written by [`RomManifestCsvService.WriteManifestToCsv`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/RomManifestCsvService.cs#L1415-L1435):
+### 6.3 9-Column ROM Manifest (`collection_manifest.csv`)
+Written and consumed by [`RomManifestCsvService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/RomManifestCsvService.cs) and [`RomManifestCsvService.CoexistenceCompat.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/RomManifestCsvService.CoexistenceCompat.cs):
 `GameTitle,ProperName,ArchiveFileName,RomOrFolderName,VerifiedLocalCrc32,VerifiedLocalHash,MatchStatus,ArchiveCompliance,Notes`
 
-### 6.4 Module 8 Universal Collection Manifest (`<ManifestName>.csv` / `.json` / `.html`)
-Written by [`CollectionManifestModule.ExportManifestsAsync`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/Modules/CollectionManifestModule.cs#L1003-L1069):
+### 6.4 Module 8 Universal Collection Manifest (`<ManifestName>.csv` / `.tsv` / `.json` / `.html`)
+Written by [`CollectionManifestModule.Exporters.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/Modules/CollectionManifestModule.Exporters.cs) honoring `CsvDelimiter` (`Comma`/`.csv`, `Tab`/`.tsv`, `Pipe`/`.csv`, `Semicolon`/`.csv`):
 Base columns: `LocationID,RootPath,RelativePath,FileName,CleanTitle,Category,YearOrRegion,ResolutionOrTags,FileSizeBytes,FileSizeFormatted,CRC32,SHA1,MD5,IntegrityStatus,IntegrityDetail` followed dynamically by every enabled custom regex/text rule column name (`CustomFields`).
+
+### 6.5 Suite, Shared-Root Coexistence & Post-Injection Container Registries
+- **Suite Companion Manifest ([`mother.manifest.json`](file:///D:/Projects/Personal/Housekeeping/Dev/mother.manifest.json) / `app\suite.manifest.json`, `schemaVersion: 2`):** Carries the canonical Standard 19 §3 6-field `camelCase` header (`$schema`, `schemaVersion`, `manifestType`, `appId`, `version`, `updatedAtUtc`) plus `suiteId`, `port` (`5178`), `httpsPort` (`8478`), `sandboxPort` (`15178`), `coexistenceStatusEndpoint` (`"/api/v1/coexistence/status"`), `commands`, `endpoints`, and `paths`.
+- **Shared-Root Coexistence Manifest (`<SharedRoot>\.coexistence.json`, `schemaVersion: 2` via [`SisterAppCoexistenceService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SisterAppCoexistenceService.cs)):**
+  ```json
+  {
+    "$schema": "https://schemas.local/manifest.v2.json",
+    "schemaVersion": 2,
+    "manifestType": "shared-root-coexistence",
+    "appId": "housekeeping",
+    "version": "0.1.12",
+    "updatedAtUtc": "2026-11-12T03:45:00Z",
+    "coexistenceMode": "Co-Audit (Zero-Rewrite)",
+    "hashFilePlacement": "SidecarBeside",
+    "syncPostInjectionContainerHashJson": true,
+    "owners": {
+      "housekeeping": {
+        "appId": "housekeeping",
+        "version": "0.1.12",
+        "port": 5178,
+        "updatedAtUtc": "2026-11-12T03:45:00Z",
+        "modules": ["CollectionManifest"],
+        "hashFilePlacement": "SidecarBeside",
+        "coexistenceMode": "Co-Audit (Zero-Rewrite)"
+      }
+    }
+  }
+  ```
+- **Post-Injection Outer Archive Registry (`<TargetDir>\.archive_hashes.json`, `schemaVersion: 1` via [`HashSidecarService.ArchiveRegistry.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.ArchiveRegistry.cs)):**
+  ```json
+  {
+    "schemaVersion": 1,
+    "updatedAtUtc": "2026-11-12T03:45:00Z",
+    "updatedByApp": "housekeeping",
+    "updatedByVersion": "0.1.12",
+    "hashFilePlacement": "PackageInsideArchive",
+    "archives": {
+      "Chrono Trigger (USA).7z": {
+        "fileName": "Chrono Trigger (USA).7z",
+        "containerSize": 2948912,
+        "lastWriteUtc": "2026-11-12T03:45:00.0000000Z",
+        "containerCrc32": "B4C5D6E7",
+        "containerMd5": "0123456789ABCDEF0123456789ABCDEF",
+        "containerSha1": "11223344556677889900AABBCCDDEEFF00112233",
+        "hasInternalHashSidecar": true,
+        "internalSidecarPath": "Chrono Trigger (USA).hash",
+        "primaryInnerFileName": "Chrono Trigger (USA).sfc",
+        "primaryInnerSize": 4194304,
+        "primaryInnerCrc32": "2D206BF7",
+        "primaryInnerMd5": "A2BC447961E52FD2227BAED164F729DC",
+        "primaryInnerSha1": "DE5DC2662F232F22B4C251247B5220A0D0753C9E"
+      }
+    }
+  }
+  ```
 
 ---
 
@@ -225,4 +307,5 @@ Base columns: `LocationID,RootPath,RelativePath,FileName,CleanTitle,Category,Yea
 ## 8. Compatibility & Integration Notes
 
 - **Backward-Compatible `.hash` Parsing:** [`HashSidecarService.TryParseSidecarDocument`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.cs#L575-L803) natively parses Housekeeping `FILE:` / `ENTRY:` sidecars, ShadowLibrary sidecars, legacy single-key `CRC32:`/`MD5:`/`SHA1:` files, and standard GNU/BSD `<hex> *<filename>` (`.sha1`, `.md5`, `.sfv`) files.
-- **Upcoming `v1.0.0-rc.12` Cross-App File Lock Contract:** Per [`v1.0.0-rc.12.2026-11-04.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/plans/v1.0.0-rc.12.2026-11-04.md), Housekeeping `rc.12` extends `HashSidecarService` and `RomLauncherGeneratorModule` to honor `<Folder>\.coexistence.json` and per-archive `.hklock` files alongside ShadowLibrary so concurrent runs across both apps never double-hash or contend on the same archive.
+- **4-Mode `HashSidecarMode` (`0..3`) & Post-Injection `.archive_hashes.json`:** [`HashSidecarService.ArchiveRegistry.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.ArchiveRegistry.cs) supports `DatabaseOnly = 0` (legacy alias `"None"`), `SidecarBeside = 1`, `PackageInsideArchive = 2`, and `SidecarAndArchive = 3`, persisting post-mutation outer archive hashes in `<Directory>\.archive_hashes.json` while preserving existing `# Container:` and `CRC32+MD5+SHA1` digests.
+- **Cross-App `.coexistence.json` (`v2`) & Standard 19 `.hklock` Coordination:** [`SisterAppCoexistenceService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SisterAppCoexistenceService.cs) and [`NetworkSafetyService.DirectoryLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DirectoryLocks.cs) coordinate shared storage roots across `ShadowLibrary (:5179)`, `Redroom (:5180)`, `uStation (:8460)`, `StreamEngine (:8430)`, and `Greenroom (:8420)` via `<VaultRoot>\.coexistence.json` (`SchemaVersion = 2`) and Standard 19 `pid` + `processStartTimeUtc` `<Dir>\.<appId>_<pid>.hklock` sentinels (automatically evicting dead or reused-PID locks).

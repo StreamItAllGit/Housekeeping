@@ -1,6 +1,11 @@
+// @module: Housekeeping.Web/pages/editors/CustomScriptsEditor
+// @purpose: Module 7 (Custom Scripts & CLI Tasks) editor with 2-line hover hints and localhost raw-shell guard.
+// @depends-on: react, ../../components/HybridPathPicker, ../../context/AppStateContext, ../../hints/customScripts, ../../types/models
+// @exports: CustomScriptsEditor
 import React from 'react';
 import { HybridPathPicker } from '../../components/HybridPathPicker';
 import { useAppState } from '../../context/AppStateContext';
+import { CUSTOM_SCRIPTS_HINTS } from '../../hints/customScripts';
 import type { CustomScriptsConfig } from '../../types/models';
 
 interface Props {
@@ -66,14 +71,14 @@ export const CustomScriptsEditor: React.FC<Props> = ({ cfg, onChange }) => {
           <table className="hk-table stack-mobile">
             <thead>
               <tr>
-                <th style={{ width: 48 }}>On</th>
-                <th style={{ width: 145 }}>Task Name</th>
-                <th>Executable or Script (.bat / .ps1 / .py / .exe)</th>
-                <th>Arguments</th>
-                <th>Working Dir</th>
-                <th>Required Path Check</th>
-                <th style={{ width: 65 }}>Ext CMD</th>
-                <th style={{ width: 60 }}>Del</th>
+                <th className="hk-has-hint" style={{ width: 48 }} title={CUSTOM_SCRIPTS_HINTS.thOn}>On</th>
+                <th className="hk-has-hint" style={{ width: 145 }} title={CUSTOM_SCRIPTS_HINTS.thTaskName}>Task Name</th>
+                <th className="hk-has-hint" title={CUSTOM_SCRIPTS_HINTS.thScript}>Executable or Script (.bat / .ps1 / .py / .exe)</th>
+                <th className="hk-has-hint" title={CUSTOM_SCRIPTS_HINTS.thArgs}>Arguments</th>
+                <th className="hk-has-hint" title={CUSTOM_SCRIPTS_HINTS.thWorkDir}>Working Dir</th>
+                <th className="hk-has-hint" title={CUSTOM_SCRIPTS_HINTS.thReqPath}>Required Path Check</th>
+                <th className="hk-has-hint" style={{ width: 65 }} title={CUSTOM_SCRIPTS_HINTS.thExtCmd}>Ext CMD</th>
+                <th className="hk-has-hint" style={{ width: 60 }} title={CUSTOM_SCRIPTS_HINTS.thDelete}>Del</th>
               </tr>
             </thead>
             <tbody>
@@ -89,6 +94,8 @@ export const CustomScriptsEditor: React.FC<Props> = ({ cfg, onChange }) => {
                   <td data-label="Enabled">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={CUSTOM_SCRIPTS_HINTS.taskEnabled}
                       disabled={rawBlocked}
                       checked={t.Enabled}
                       onChange={(e) =>
@@ -169,6 +176,8 @@ export const CustomScriptsEditor: React.FC<Props> = ({ cfg, onChange }) => {
                   <td data-label="External CMD">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={CUSTOM_SCRIPTS_HINTS.externalCmd}
                       disabled={rawBlocked}
                       checked={t.RunInExternalCmd}
                       onChange={(e) =>
@@ -183,11 +192,7 @@ export const CustomScriptsEditor: React.FC<Props> = ({ cfg, onChange }) => {
                       type="button"
                       className="hk-btn sm danger"
                       disabled={rawBlocked}
-                      onClick={() =>
-                        onChange((d) => {
-                          d.Tasks.splice(idx, 1);
-                        })
-                      }
+                      onClick={() => onChange((d) => d.Tasks.splice(idx, 1))}
                     >
                       ✕
                     </button>

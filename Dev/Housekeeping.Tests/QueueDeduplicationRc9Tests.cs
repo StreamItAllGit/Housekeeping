@@ -89,29 +89,21 @@ namespace Housekeeping.Tests
             public async ValueTask DisposeAsync()
             {
                 Client.Dispose();
-                try { await App.StopAsync(); } catch { }
-                try { await App.DisposeAsync(); } catch { }
-                try { Runtime.Dispose(); } catch { }
-                try
-                {
-                    if (Directory.Exists(DataDir))
-                        Directory.Delete(DataDir, recursive: true);
-                }
-                catch { }
+                await TestCleanupHelper.TryAwaitAsync(() => App.StopAsync(), "App.StopAsync");
+                await TestCleanupHelper.TryAwaitAsync(async () => await App.DisposeAsync(), "App.DisposeAsync");
+                TestCleanupHelper.TryDispose(Runtime, "HousekeepingRuntimeContainer");
+                TestCleanupHelper.TryDeleteDirectory(DataDir);
             }
         }
 
-        private static HousekeepingJob MakeTestJob(string id, string name)
+        private static HousekeepingJob MakeTestJob(string id, string name) => new()
         {
-            return new HousekeepingJob
-            {
-                JobId = id,
-                Name = name,
-                Enabled = true,
-                ModuleType = ModuleId.CustomScripts,
-                CustomScripts = new CustomScriptsConfig { Enabled = true }
-            };
-        }
+            JobId = id,
+            Name = name,
+            Enabled = true,
+            ModuleType = ModuleId.CustomScripts,
+            CustomScripts = new CustomScriptsConfig { Enabled = true }
+        };
 
         private static void EnableCustomScriptsAppWide(AppConfig cfg)
         {
@@ -376,7 +368,7 @@ namespace Housekeeping.Tests
             harness.Runtime.Orchestrator.StopActiveRun();
             gateActive.TrySetCanceled();
             var t = harness.Runtime.Orchestrator.ActiveExecutionTask;
-            if (t != null) { try { await t.WaitAsync(TimeSpan.FromSeconds(5)); } catch { } }
+            if (t != null) await TestCleanupHelper.TryAwaitAsync(() => t.WaitAsync(TimeSpan.FromSeconds(5)), "ActiveExecutionTask");
         }
 
         [Fact]

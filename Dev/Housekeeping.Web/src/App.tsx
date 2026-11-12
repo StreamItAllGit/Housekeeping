@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
+import { DrivesTableModal } from './components/DrivesTableModal';
 import { GlobalTerminalDrawer } from './components/GlobalTerminalDrawer';
 import { KeyboardShortcutsModal } from './components/KeyboardShortcutsModal';
 import { LoginGateDialog } from './components/LoginGateDialog';
+import { MobileBottomNavBar } from './components/MobileBottomNavBar';
 import { OmniSearchModal } from './components/OmniSearchModal';
 import { SidebarNavRail } from './components/SidebarNavRail';
 import { TopCommandBar } from './components/TopCommandBar';
@@ -103,12 +105,14 @@ const InterruptedRunRecoveryBanner: React.FC = () => {
       <div className="hk-row">
         {config && (
           <label
-            className="hk-checkbox-label"
+            className="hk-checkbox-label hk-has-hint"
             style={{ fontSize: 'var(--font-small)', marginRight: 6 }}
-            title="Automatically resume interrupted jobs or queues whenever Housekeeping starts up"
+            title={'Automatically resume interrupted jobs or queues whenever Housekeeping starts up.\nSkips jobs already completed prior to the graceful shutdown checkpoint.'}
           >
             <input
               type="checkbox"
+              className="hk-has-hint"
+              title={'Automatically resume interrupted jobs or queues whenever Housekeeping starts up.\nSkips jobs already completed prior to the graceful shutdown checkpoint.'}
               checked={Boolean(config.AutoRestartInterruptedRunsOnStartup)}
               onChange={(e) =>
                 updateConfig((d) => {
@@ -154,7 +158,7 @@ const InterruptedRunRecoveryBanner: React.FC = () => {
 };
 
 const AppWorkspace: React.FC = () => {
-  const { activeTab, toastMessage } = useAppState();
+  const { activeTab, toastMessage, telemetry, drivesModalOpen, setDrivesModalOpen } = useAppState();
   const [searchOpen, setSearchOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
@@ -201,9 +205,15 @@ const AppWorkspace: React.FC = () => {
         </main>
         <GlobalTerminalDrawer />
       </div>
+      <MobileBottomNavBar />
       <LoginGateDialog />
       <OmniSearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
       <KeyboardShortcutsModal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      <DrivesTableModal
+        open={drivesModalOpen}
+        onClose={() => setDrivesModalOpen(false)}
+        disks={telemetry?.Disks || []}
+      />
 
       {toastMessage && (
         <div role="status" aria-live="polite" className="hk-toast">

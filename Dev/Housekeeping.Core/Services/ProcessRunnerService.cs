@@ -313,7 +313,7 @@ namespace Housekeeping.Services
                 {
                     read = await reader.ReadAsync(buffer.AsMemory(0, buffer.Length), ct);
                 }
-                catch
+                catch (Exception ex) when (ex is OperationCanceledException or ObjectDisposedException or IOException)
                 {
                     break;
                 }
@@ -345,10 +345,31 @@ namespace Housekeeping.Services
             }
         }
 
-        private static void TryKillProcessTree(Process process)
+        public void ResumeActiveProcessIfSuspended()
+        {
+            var proc = _activeProcess;
+            if (!_isSuspended || proc == null) return;
+            try { if (!proc.HasExited) NativeProcessSuspend.ResumeProcessTree(proc.Id); }
+            catch (Exception ex) { Debug.WriteLine($"[ProcessRunnerService] ResumeActiveProcessIfSuspended ignored: {ex.Message}"); }
+            finally { _isSuspended = false; }
+        }
+
+        public void KillActiveProcess()
+        {
+            var proc = _activeProcess;
+            if (proc != null) TryKillProcessTree(proc);
+        }
+
+        private void TryKillProcessTree(Process process)
         {
             try
             {
+                if (_isSuspended)
+                {
+                    try { NativeProcessSuspend.ResumeProcessTree(process.Id); }
+                    catch (Exception resumeEx) { Debug.WriteLine($"[ProcessRunnerService] Resume before kill ignored: {resumeEx.Message}"); }
+                    _isSuspended = false;
+                }
                 if (!process.HasExited)
                     process.Kill(entireProcessTree: true);
             }

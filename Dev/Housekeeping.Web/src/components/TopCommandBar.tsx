@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useAppState, type NavTabId, type UiDensityMode } from '../context/AppStateContext';
+import { useAppState, type UiDensityMode } from '../context/AppStateContext';
 import { apiClient } from '../services/apiClient';
 import type { TailscalePwaStatusDto } from '../types/models';
 import { ModalDialog } from './ModalDialog';
@@ -25,18 +25,17 @@ export const TopCommandBar: React.FC = () => {
     pipelineState,
     setPipelineState,
     telemetry,
-    openComplianceCount,
     activeTargetNodeId,
     setActiveTargetNodeId,
     colorScheme,
     toggleTwoStateColorScheme,
     density,
     setDensity,
+    setDrivesModalOpen,
     showToast,
   } = useAppState();
 
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
-  const [drivesModalOpen, setDrivesModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
@@ -48,12 +47,10 @@ export const TopCommandBar: React.FC = () => {
   const [tailscalePwa, setTailscalePwa] = useState<TailscalePwaStatusDto | null>(null);
   const fileImportRef = useRef<HTMLInputElement | null>(null);
 
-  const isInsecureRemoteOrigin =
-    typeof window !== 'undefined' && !window.isSecureContext;
+  const isInsecureRemoteOrigin = typeof window !== 'undefined' && !window.isSecureContext;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-
     const onBeforeInstall = (e: Event) => {
       e.preventDefault();
       setInstallPrompt(e as BeforeInstallPromptEvent);
@@ -62,7 +59,6 @@ export const TopCommandBar: React.FC = () => {
       setInstallPrompt(null);
       setIsStandalonePwa(true);
     };
-
     window.addEventListener('beforeinstallprompt', onBeforeInstall);
     window.addEventListener('appinstalled', onInstalled);
     return () => {
@@ -76,7 +72,9 @@ export const TopCommandBar: React.FC = () => {
     apiClient
       .getTailscalePwaStatus()
       .then((res) => setTailscalePwa(res))
-      .catch(() => {});
+      .catch((err) => {
+        console.debug('[TopCommandBar] Tailscale PWA probe skipped:', err);
+      });
   }, [authStatus?.isAuthenticated, isInsecureRemoteOrigin]);
 
   const handleInstallPwa = async () => {
@@ -84,11 +82,9 @@ export const TopCommandBar: React.FC = () => {
     try {
       await installPrompt.prompt();
       const choice = await installPrompt.userChoice;
-      if (choice.outcome === 'accepted') {
-        setInstallPrompt(null);
-      }
-    } catch {
-      // ignore
+      if (choice.outcome === 'accepted') setInstallPrompt(null);
+    } catch (err) {
+      console.debug('[TopCommandBar] PWA prompt dismissed:', err);
     }
   };
 
@@ -143,13 +139,23 @@ export const TopCommandBar: React.FC = () => {
     }
   };
 
-  const handleStop = async () => {
+  const handleStopJob = async () => {
     try {
-      const res = await apiClient.stopPipeline();
+      const res = await apiClient.stopCurrentJob();
       setPipelineState(res.state);
-      showToast('Stop signal sent to active pipeline.');
+      showToast('Cancelled current job — advancing queue.');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Stop failed.');
+      showToast(err instanceof Error ? err.message : 'Stop Job failed.');
+    }
+  };
+
+  const handleStopQueue = async () => {
+    try {
+      const res = await apiClient.stopEntireQueue();
+      setPipelineState(res.state);
+      showToast('Stopped entire active queue and cleared Up Next.');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Stop Queue failed.');
     }
   };
 
@@ -167,15 +173,9 @@ export const TopCommandBar: React.FC = () => {
     }
   };
 
-  const navItems: { id: NavTabId; label: string; icon: string; badge?: number }[] = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'queues', label: 'Job Queues', icon: '🗂' },
-    { id: 'builder', label: 'Job Builder', icon: '🛠' },
-    { id: 'modules', label: 'Modules', icon: '🧩' },
-    { id: 'reports', label: 'Reports', icon: '🛡', badge: openComplianceCount },
-    { id: 'settings', label: 'Settings', icon: '⚙' },
-    { id: 'history', label: 'History', icon: '📜' },
-  ];
+  useEffect(() => {
+    setMobileControlsOpen(false);
+  }, [activeTab]);
 
   const isDarkRendered =
     colorScheme === 'dark' ||
@@ -183,11 +183,19 @@ export const TopCommandBar: React.FC = () => {
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-  const compactMobilePromptDir = authStatus?.version || '1.0.0-rc.11-hf.1';
+  const versionNumber = (authStatus?.version || '0.1.12').replace(/^v/i, '');
+
+  const openWebSettingsSubtab = () => {
+    try {
+      sessionStorage.setItem('hk-settings-subtab', 'web');
+    } catch (err) {
+      console.debug('[TopCommandBar] sessionStorage write skipped:', err);
+    }
+    setActiveTab('settings');
+  };
 
   return (
     <header className="hk-topbar">
-      {/* Shared Hidden File Input for Desktop & Mobile Profile Import */}
       <input
         ref={fileImportRef}
         type="file"
@@ -196,18 +204,15 @@ export const TopCommandBar: React.FC = () => {
         onChange={(e) => void handleImportFile(e)}
       />
 
-      {/* Desktop Top Command Bar (> 768px — 100% preserved) */}
+      {/* Desktop Top Command Bar (> 768px — consolidated without duplicate drive pills) */}
       <div className="hk-topbar-row hk-desktop-only">
-        {/* Left: Brand + Version + Target Node Switcher + Auto-Save + Snapshots */}
         <div className="hk-row">
           <div className="hk-brand">
             <img src="/app_icon.png" alt="Housekeeping" />
             <div>
               <div className="hk-row" style={{ gap: 6 }}>
                 <span className="hk-brand-title">Housekeeping</span>
-                <span className="hk-version-pill">
-                  v{compactMobilePromptDir}
-                </span>
+                <span className="hk-version-pill">v{versionNumber}</span>
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
                 {pipelineState.GlobalNextRunStatusText || 'Schedule: Disabled'}
@@ -215,7 +220,6 @@ export const TopCommandBar: React.FC = () => {
             </div>
           </div>
 
-          {/* Target Node Switcher (Decision 5) */}
           <select
             className="hk-select"
             style={{ width: 'auto', fontWeight: 600 }}
@@ -224,9 +228,7 @@ export const TopCommandBar: React.FC = () => {
             aria-label="Target Machine Node Switcher"
             title="Switch active Target Node (Local Machine or Remote LAN/Tailnet Node)"
           >
-            <option value="local">
-              🖥 Local ({authStatus?.machineName || 'Host'})
-            </option>
+            <option value="local">🖥 Local ({authStatus?.machineName || 'Host'})</option>
             {remoteNodes.map((n) => (
               <option key={n.Id} value={n.Id}>
                 🌐 {n.Name} ({n.HostOrIp || n.RemoteAppPath})
@@ -234,20 +236,14 @@ export const TopCommandBar: React.FC = () => {
             ))}
           </select>
 
-          {/* Auto-Save Status Pill + Force Save (Ctrl+S) + 20-Snapshot History (Decision 8) */}
           {saveState === 'saved' && (
-            <span className="hk-pill ok" title="All changes saved to settings.json (Ctrl+S to force save)">
+            <span className="hk-pill ok nowrap" title="All changes saved to settings.json (Ctrl+S to force save)">
               ✓ Saved
             </span>
           )}
-          {saveState === 'saving' && (
-            <span className="hk-pill accent">⟳ Saving...</span>
-          )}
+          {saveState === 'saving' && <span className="hk-pill accent nowrap">⟳ Saving...</span>}
           {saveState === 'error' && (
-            <span
-              className="hk-pill err"
-              title={saveErrors.join('\n')}
-            >
+            <span className="hk-pill err nowrap" title={saveErrors.join('\n')}>
               ⚠ Validation Error ({saveErrors[0] || 'Check inputs'})
             </span>
           )}
@@ -270,77 +266,14 @@ export const TopCommandBar: React.FC = () => {
             ↺ History ({snapshotsCount})
           </button>
 
-          <button
-            type="button"
-            className="hk-btn sm"
-            onClick={() => fileImportRef.current?.click()}
-          >
+          <button type="button" className="hk-btn sm" onClick={() => fileImportRef.current?.click()}>
             📥 Import
           </button>
-          <button
-            type="button"
-            className="hk-btn sm"
-            onClick={() => setExportModalOpen(true)}
-          >
+          <button type="button" className="hk-btn sm" onClick={() => setExportModalOpen(true)}>
             📤 Export
           </button>
         </div>
 
-        {/* Center: Live Local + Mapped Network/NAS Drive Free-Space Strip */}
-        {disks.length > 0 && (
-          <div className="hk-drive-strip desktop-only" aria-label="Mounted local and network drive free space">
-            {disks.slice(0, 16).map((d) => {
-              const isReady = d.IsReady !== false;
-              const isNet = Boolean(d.IsNetwork);
-              const ratio = isReady && d.TotalGb > 0 ? d.FreeGb / d.TotalGb : 1;
-              const dotClass = !isReady
-                ? 'err'
-                : d.FreeGb < 25 || ratio < 0.05
-                  ? 'err'
-                  : ratio < 0.12
-                    ? 'warn'
-                    : '';
-              const shareInfo = d.RemotePath
-                ? ` (${d.VolumeLabel ? `${d.VolumeLabel} — ` : ''}${d.RemotePath})`
-                : d.VolumeLabel
-                  ? ` (${d.VolumeLabel})`
-                  : '';
-              const tooltip = isReady
-                ? `${isNet ? '🌐 NAS/Network ' : '💾 Local '}${d.DriveLetter}${shareInfo} • ${d.FreeGb.toFixed(1)} GB free of ${d.TotalGb.toFixed(1)} GB — click for all drives`
-                : `${isNet ? '🌐 NAS/Network ' : '💾 '}${d.DriveLetter}${shareInfo} • Offline / Unreachable — click for all drives`;
-
-              return (
-                <button
-                  key={d.DriveLetter}
-                  type="button"
-                  className={`hk-drive-pill ${isNet ? 'network' : ''} ${!isReady ? 'offline' : ''}`}
-                  title={tooltip}
-                  onClick={() => setDrivesModalOpen(true)}
-                >
-                  <span className={`hk-drive-dot ${dotClass}`} />
-                  {!isReady
-                    ? `${d.DriveLetter} !`
-                    : `${d.DriveLetter} ${
-                        d.FreeGb >= 1000
-                          ? `${(d.FreeGb / 1024).toFixed(1)} TB`
-                          : `${d.FreeGb >= 100 ? d.FreeGb.toFixed(0) : d.FreeGb.toFixed(1)} GB`
-                      }`}
-                </button>
-              );
-            })}
-            {disks.length > 16 && (
-              <button
-                type="button"
-                className="hk-btn sm"
-                onClick={() => setDrivesModalOpen(true)}
-              >
-                +{disks.length - 16} Drives
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Right: PWA Install + Density + Theme + Post-Run Power + Run / Dry-Run / Pause / Suspend / Stop */}
         <div className="hk-row">
           {!isStandalonePwa && installPrompt && (
             <button
@@ -352,33 +285,31 @@ export const TopCommandBar: React.FC = () => {
               📲 Install App
             </button>
           )}
-          {!isStandalonePwa && isInsecureRemoteOrigin && tailscalePwa?.ServeConfigured && tailscalePwa.HttpsPwaUrl && (
-            <a
-              href={tailscalePwa.HttpsPwaUrl}
-              className="hk-btn sm primary"
-              style={{ textDecoration: 'none' }}
-              title="Android/iOS require HTTPS to install a PWA — tap to switch to your trusted Tailscale HTTPS URL"
-            >
-              🔒 Switch to HTTPS (PWA)
-            </a>
-          )}
-          {!isStandalonePwa && isInsecureRemoteOrigin && (!tailscalePwa?.ServeConfigured || !tailscalePwa.HttpsPwaUrl) && (
-            <button
-              type="button"
-              className="hk-btn sm"
-              onClick={() => {
-                try {
-                  sessionStorage.setItem('hk-settings-subtab', 'web');
-                } catch {
-                  // ignore
-                }
-                setActiveTab('settings');
-              }}
-              title="Configure Tailscale Serve HTTPS so Android can install Housekeeping as a standalone PWA"
-            >
-              📱 Setup HTTPS PWA
-            </button>
-          )}
+          {!isStandalonePwa &&
+            isInsecureRemoteOrigin &&
+            tailscalePwa?.ServeConfigured &&
+            tailscalePwa.HttpsPwaUrl && (
+              <a
+                href={tailscalePwa.HttpsPwaUrl}
+                className="hk-btn sm primary"
+                style={{ textDecoration: 'none' }}
+                title="Android/iOS require HTTPS to install a PWA — tap to switch to your trusted Tailscale HTTPS URL"
+              >
+                🔒 Switch to HTTPS (PWA)
+              </a>
+            )}
+          {!isStandalonePwa &&
+            isInsecureRemoteOrigin &&
+            (!tailscalePwa?.ServeConfigured || !tailscalePwa.HttpsPwaUrl) && (
+              <button
+                type="button"
+                className="hk-btn sm"
+                onClick={openWebSettingsSubtab}
+                title="Configure Tailscale Serve HTTPS so Android can install Housekeeping as a standalone PWA"
+              >
+                📱 Setup HTTPS PWA
+              </button>
+            )}
 
           <select
             className="hk-select"
@@ -406,7 +337,6 @@ export const TopCommandBar: React.FC = () => {
           >
             {isDarkRendered ? '☀ Light' : '🌙 Dark'}
           </button>
-
 
           <button
             type="button"
@@ -449,11 +379,21 @@ export const TopCommandBar: React.FC = () => {
           </button>
           <button
             type="button"
+            className="hk-btn warn"
+            disabled={!pipelineState.IsRunning}
+            onClick={() => void handleStopJob()}
+            title="Cancel only the current job and advance to the next job in the queue"
+          >
+            ⏹ Stop Job
+          </button>
+          <button
+            type="button"
             className="hk-btn danger"
             disabled={!pipelineState.IsRunning}
-            onClick={() => void handleStop()}
+            onClick={() => void handleStopQueue()}
+            title="Stop the entire active queue and clear pending Up Next runs"
           >
-            ⏹ Stop
+            ⏹ Stop Queue
           </button>
         </div>
       </div>
@@ -468,7 +408,7 @@ export const TopCommandBar: React.FC = () => {
                 Housekeeping
               </span>
               <span className="hk-version-pill" style={{ fontSize: 10, padding: '1px 5px' }}>
-                v{compactMobilePromptDir}
+                v{versionNumber}
               </span>
             </div>
             <div className="hk-mobile-brand-schedule">
@@ -518,12 +458,23 @@ export const TopCommandBar: React.FC = () => {
               </button>
               <button
                 type="button"
-                className="hk-btn sm danger"
-                style={{ padding: '0 8px' }}
-                onClick={() => void handleStop()}
-                aria-label="Stop active pipeline"
+                className="hk-btn sm warn"
+                style={{ padding: '0 7px' }}
+                onClick={() => void handleStopJob()}
+                aria-label="Stop current job"
+                title="Stop current job"
               >
-                ⏹
+                ⏹J
+              </button>
+              <button
+                type="button"
+                className="hk-btn sm danger"
+                style={{ padding: '0 7px' }}
+                onClick={() => void handleStopQueue()}
+                aria-label="Stop entire queue"
+                title="Stop entire queue"
+              >
+                ⏹Q
               </button>
             </>
           )}
@@ -541,7 +492,6 @@ export const TopCommandBar: React.FC = () => {
         </div>
       </div>
 
-      {/* Expandable Mobile Controls Drawer (<= 768px) */}
       {mobileControlsOpen && (
         <div className="hk-mobile-only-block">
           <div className="hk-mobile-controls-sheet">
@@ -553,9 +503,7 @@ export const TopCommandBar: React.FC = () => {
                 onChange={(e) => setActiveTargetNodeId(e.target.value)}
                 aria-label="Mobile Target Machine Node Switcher"
               >
-                <option value="local">
-                  🖥 Local ({authStatus?.machineName || 'Host'})
-                </option>
+                <option value="local">🖥 Local ({authStatus?.machineName || 'Host'})</option>
                 {remoteNodes.map((n) => (
                   <option key={n.Id} value={n.Id}>
                     🌐 {n.Name} ({n.HostOrIp || n.RemoteAppPath})
@@ -563,10 +511,10 @@ export const TopCommandBar: React.FC = () => {
                 ))}
               </select>
 
-              {saveState === 'saved' && <span className="hk-pill ok">✓ Saved</span>}
-              {saveState === 'saving' && <span className="hk-pill accent">⟳ Saving...</span>}
+              {saveState === 'saved' && <span className="hk-pill ok nowrap">✓ Saved</span>}
+              {saveState === 'saving' && <span className="hk-pill accent nowrap">⟳ Saving...</span>}
               {saveState === 'error' && (
-                <span className="hk-pill err" title={saveErrors.join('\n')}>
+                <span className="hk-pill err nowrap" title={saveErrors.join('\n')}>
                   ⚠ Error
                 </span>
               )}
@@ -582,33 +530,33 @@ export const TopCommandBar: React.FC = () => {
                 📲 Install Housekeeping App
               </button>
             )}
-            {!isStandalonePwa && isInsecureRemoteOrigin && tailscalePwa?.ServeConfigured && tailscalePwa.HttpsPwaUrl && (
-              <a
-                href={tailscalePwa.HttpsPwaUrl}
-                className="hk-btn sm primary"
-                style={{ textDecoration: 'none', width: '100%', justifyContent: 'center' }}
-              >
-                🔒 Switch to Trusted HTTPS (PWA)
-              </a>
-            )}
-            {!isStandalonePwa && isInsecureRemoteOrigin && (!tailscalePwa?.ServeConfigured || !tailscalePwa.HttpsPwaUrl) && (
-              <button
-                type="button"
-                className="hk-btn sm"
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => {
-                  try {
-                    sessionStorage.setItem('hk-settings-subtab', 'web');
-                  } catch {
-                    // ignore
-                  }
-                  setMobileControlsOpen(false);
-                  setActiveTab('settings');
-                }}
-              >
-                📱 Setup HTTPS PWA
-              </button>
-            )}
+            {!isStandalonePwa &&
+              isInsecureRemoteOrigin &&
+              tailscalePwa?.ServeConfigured &&
+              tailscalePwa.HttpsPwaUrl && (
+                <a
+                  href={tailscalePwa.HttpsPwaUrl}
+                  className="hk-btn sm primary"
+                  style={{ textDecoration: 'none', width: '100%', justifyContent: 'center' }}
+                >
+                  🔒 Switch to Trusted HTTPS (PWA)
+                </a>
+              )}
+            {!isStandalonePwa &&
+              isInsecureRemoteOrigin &&
+              (!tailscalePwa?.ServeConfigured || !tailscalePwa.HttpsPwaUrl) && (
+                <button
+                  type="button"
+                  className="hk-btn sm"
+                  style={{ width: '100%', justifyContent: 'center' }}
+                  onClick={() => {
+                    setMobileControlsOpen(false);
+                    openWebSettingsSubtab();
+                  }}
+                >
+                  📱 Setup HTTPS PWA
+                </button>
+              )}
 
             <div className="hk-mobile-sheet-grid">
               <button
@@ -659,12 +607,21 @@ export const TopCommandBar: React.FC = () => {
 
               <button
                 type="button"
+                className="hk-btn sm warn"
+                disabled={!pipelineState.IsRunning}
+                onClick={() => void handleStopJob()}
+              >
+                ⏹ Stop Job
+              </button>
+              <button
+                type="button"
                 className="hk-btn sm danger"
                 disabled={!pipelineState.IsRunning}
-                onClick={() => void handleStop()}
+                onClick={() => void handleStopQueue()}
               >
-                ⏹ Stop Pipeline
+                ⏹ Stop Queue
               </button>
+
               <button
                 type="button"
                 className="hk-btn sm"
@@ -675,7 +632,6 @@ export const TopCommandBar: React.FC = () => {
               >
                 💾 Drives ({disks.length})
               </button>
-
               <button
                 type="button"
                 className="hk-btn sm"
@@ -718,43 +674,16 @@ export const TopCommandBar: React.FC = () => {
                 <option value="comfortable">Density: Comfort</option>
                 <option value="touch">Density: Touch</option>
               </select>
-              <button
-                type="button"
-                className="hk-btn sm"
-                onClick={toggleTwoStateColorScheme}
-              >
+              <button type="button" className="hk-btn sm" onClick={toggleTwoStateColorScheme}>
                 {isDarkRendered ? '☀ Light Theme' : '🌙 Dark Theme'}
               </button>
             </div>
-
           </div>
         </div>
       )}
 
-      {/* Mobile-only Navigation Tabs (Desktop driven by SidebarNavRail) */}
-      <nav className="hk-nav-tabs hk-mobile-only" aria-label="Mobile sections">
-        {navItems.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={`hk-nav-tab ${activeTab === tab.id ? 'active' : ''}`}
-            onClick={() => {
-              setMobileControlsOpen(false);
-              setActiveTab(tab.id);
-            }}
-          >
-            <span>{tab.icon}</span>
-            <span>{tab.label}</span>
-            {typeof tab.badge === 'number' && tab.badge > 0 && (
-              <span className="hk-badge-count">{tab.badge}</span>
-            )}
-          </button>
-        ))}
-      </nav>
-
       <SnapshotHistoryDialog open={snapshotsOpen} onClose={() => setSnapshotsOpen(false)} />
 
-      {/* Export Profile Modal */}
       <ModalDialog
         open={exportModalOpen}
         onClose={() => setExportModalOpen(false)}
@@ -783,55 +712,6 @@ export const TopCommandBar: React.FC = () => {
           >
             🔐 Export Full Backup
           </a>
-        </div>
-      </ModalDialog>
-
-      {/* Full Drives Drawer Modal */}
-      <ModalDialog
-        open={drivesModalOpen}
-        onClose={() => setDrivesModalOpen(false)}
-        title="💾 Mounted Local & NAS Drives"
-        size="normal"
-        closedBy="any"
-      >
-        <div className="table-wrapper" tabIndex={0} role="region" aria-label="All mounted drives">
-          <table className="hk-table stack-mobile">
-            <thead>
-              <tr>
-                <th>Drive</th>
-                <th>Type</th>
-                <th>Volume / Share</th>
-                <th>Status</th>
-                <th>Free Space</th>
-                <th>Total Capacity</th>
-              </tr>
-            </thead>
-            <tbody>
-              {disks.map((d) => {
-                const isReady = d.IsReady !== false;
-                return (
-                  <tr key={d.DriveLetter}>
-                    <td data-label="Drive"><strong>{d.DriveLetter}</strong></td>
-                    <td data-label="Type">{d.IsNetwork ? '🌐 Network / NAS' : d.DriveType || 'Local'}</td>
-                    <td data-label="Volume / Share" style={{ fontFamily: d.RemotePath ? 'var(--font-mono)' : undefined, fontSize: 12 }}>
-                      {d.RemotePath
-                        ? d.VolumeLabel
-                          ? `${d.VolumeLabel} (${d.RemotePath})`
-                          : d.RemotePath
-                        : d.VolumeLabel || '—'}
-                    </td>
-                    <td data-label="Status">
-                      <span className={`hk-pill ${isReady ? 'ok' : 'err'}`}>
-                        {isReady ? 'Online' : 'Offline (!)'}
-                      </span>
-                    </td>
-                    <td data-label="Free Space">{isReady ? d.FreeText : '—'}</td>
-                    <td data-label="Total Capacity">{isReady ? `${d.TotalGb.toFixed(1)} GB` : '—'}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
         </div>
       </ModalDialog>
     </header>

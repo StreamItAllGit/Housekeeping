@@ -11,7 +11,12 @@ export type ModuleId =
 export type SourceDetectionMode = 'FilenameTagMatching' | 'MediaInfoResolutionScan';
 export type VerbosityLevel = 'AlertsOnly' | 'Quiet' | 'ProgressAndStatus' | 'Everything' | 'Custom';
 export type FooterVerbosityLevel = 'AlertsOnly' | 'Quiet' | 'ProgressAndStatus' | 'Everything' | 'Custom';
-export type HashSidecarMode = 'None' | 'SidecarBeside' | 'PackageInsideArchive';
+export type HashSidecarMode =
+  | 'DatabaseOnly'
+  | 'None'
+  | 'SidecarBeside'
+  | 'PackageInsideArchive'
+  | 'SidecarAndArchive';
 export type AuditStructureMode = 'Auto' | 'FilesOnly' | 'FolderDumpsOnly';
 export type MasterScheduleMode = 'DailyTime' | 'IntervalCadence' | 'SpecificTimes';
 export type RemoteConnectionType = 'WindowsUncShare' | 'OpenSsh' | 'WinRm';
@@ -336,6 +341,9 @@ export interface CollectionManifestConfig {
   HashFilePlacement: HashSidecarMode;
   DeepInspectAndHashInnerRoms: boolean;
   TrustExistingHashFiles: boolean;
+  SkipShadowLibraryManagedRoots?: boolean;
+  SyncPostInjectionContainerHashJson?: boolean;
+  CleanDisallowedHashFilesOnMigrate?: boolean;
   StructureMode: AuditStructureMode;
   LogCadenceItems: number;
   LogCadenceSeconds: number;
@@ -437,6 +445,8 @@ export interface AppConfig {
   EnableWatchdog: boolean;
   WatchdogIntervalMinutes: number;
   AutoRestartInterruptedRunsOnStartup?: boolean;
+  AutoAlignWithSisterApps?: boolean;
+  UiLayout?: import('./coexistenceModels').UiLayoutConfig;
   JobBuilderSortMode: string;
   JobBuilderFilterModule: string;
   JobBuilderViewMode: string;
@@ -643,23 +653,6 @@ export interface ModuleCatalogItemDto {
   DefinedJobCount: number;
 }
 
-export interface DependencyStatusItem {
-  ToolName: string;
-  Description: string;
-  IsAvailable: boolean;
-  SourceLabel: string;
-  ResolvedPath: string;
-}
-
-export interface RegexPlaygroundResultDto {
-  SampleInput: string;
-  FileName: string;
-  RelativePath: string;
-  FullPath: string;
-  ExtractedFields: Record<string, string>;
-  ValidationErrors: string[];
-}
-
 export interface ComplianceIssueDetail {
   Kind: string;
   Severity: string;
@@ -723,99 +716,21 @@ export interface ArchiveCleanupDryRunResult {
   ReclaimedBytes: number;
 }
 
-export interface GreenroomStatusDto {
-  Enabled: boolean;
-  CompanionOnline: boolean;
-  CompanionBaseUrl: string;
-  BrowserCompanionUrl: string;
-  CliFallbackAvailable: boolean;
-  CliScriptPath: string;
-  StatusMessage: string;
-  LastAutoSyncUtc?: string | null;
-  LastAutoSyncSummary: string;
-}
-
-export interface TailscalePwaStatusDto {
-  TailscaleAvailable: boolean;
-  BackendState: string;
-  DnsName: string;
-  TailscaleIp: string;
-  HttpsCertsEnabled: boolean;
-  ServeConfigured: boolean;
-  HttpsPwaUrl: string;
-  PendingAuthUrl: string;
-  ServeSummary: string;
-  StatusMessage: string;
-}
-
-export interface RunHistoryEntry {
-  StartedAt: string;
-  CompletedAt: string;
-  TriggerSource: string;
-  ModulesSummary: string;
-  ItemsProcessed: number;
-  ItemsSkipped: number;
-  ErrorsCount: number;
-  Status: string;
-  LogFilePath: string;
-}
-
-export interface FsDriveItem {
-  name: string;
-  driveLetter: string;
-  driveType: string;
-  isReady: boolean;
-  volumeLabel: string;
-  freeGb: number;
-  totalGb: number;
-}
-
-export interface FsBrowseResponse {
-  currentPath: string;
-  parentPath?: string | null;
-  directories: { name: string; fullPath: string; lastModifiedUtc: string }[];
-  files: { name: string; fullPath: string; sizeBytes: number; extension: string }[];
-}
-
-export const MODULE_METADATA: Record<ModuleId, { badge: string; short: string; desc: string }> = {
-  ProxyGenerator: {
-    badge: '🎬 Proxy Gen',
-    short: 'Proxy Gen',
-    desc: 'Creates lightweight editing proxies next to source footage for smooth NLE scrubbing.',
-  },
-  ArchiveCompressor: {
-    badge: '📦 Video Archiver',
-    short: 'Video Archiver',
-    desc: 'Compresses working video folders into space-efficient long-term HEVC/AV1 archives.',
-  },
-  MediaTranscoder: {
-    badge: '📺 Media Transcoder',
-    short: 'Media Transcoder',
-    desc: 'Scans media drives for master sources and generates 144p–4K streaming tiers for Plex/Jellyfin.',
-  },
-  RomLauncherGenerator: {
-    badge: '🎮 Game Launchers',
-    short: 'Game Launchers',
-    desc: 'Builds .m3u playlists, 7z archives, one-click launchers, CRC32+SHA1 manifests, compliance scans & save sync.',
-  },
-  CloudSync: {
-    badge: '☁ Cloud Sync',
-    short: 'Cloud Sync',
-    desc: 'Synchronizes local folders with cloud remotes (Google Drive, OneDrive, NAS) via rclone.',
-  },
-  HumbleSync: {
-    badge: '📚 Humble Library',
-    short: 'Humble Library',
-    desc: 'Downloads and updates purchased Humble Bundle eBooks, audio, and DRM-free games via hbd.',
-  },
-  CustomScripts: {
-    badge: '⚡ Custom Tasks',
-    short: 'Custom Tasks',
-    desc: 'Runs custom .bat, .cmd, .ps1 PowerShell, Python scripts, or command-line tools.',
-  },
-  CollectionManifest: {
-    badge: '📋 Collection Manifest',
-    short: 'Collection Manifest',
-    desc: 'Recursively audits video & game libraries with No-Intro/Redump DATs, composite hashing, .hash sidecars & regex fields.',
-  },
-};
+export type {
+  ApplyCoexistencePresetRequest,
+  CoexistenceConflictDto,
+  CoexistenceManagedRootDto,
+  CoexistencePeerSummaryDto,
+  CoexistencePresetId,
+  CoexistenceStatusDto,
+  DependencyStatusItem,
+  FsBrowseResponse,
+  FsDriveItem,
+  GreenroomStatusDto,
+  RegexPlaygroundResultDto,
+  RunHistoryEntry,
+  TailscalePwaStatusDto,
+  TerminalSizePreset,
+  UiLayoutConfig,
+} from './coexistenceModels';
+export { MODULE_METADATA, type ModuleDisplayMeta } from '../constants/moduleMetadata';

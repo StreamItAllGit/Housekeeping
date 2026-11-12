@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import { apiClient } from '../services/apiClient';
 import type { FsBrowseResponse, FsDriveItem } from '../types/models';
 import { ModalDialog } from './ModalDialog';
@@ -173,9 +174,9 @@ export const ServerFolderPickerDialog: React.FC<ServerFolderPickerDialogProps> =
         <table className="hk-table">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>Details</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.serverBrowseCol('Item Name')}>Name</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.serverBrowseCol('Entry Type')}>Type</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.serverBrowseCol('Timestamp / Size')}>Details</th>
             </tr>
           </thead>
           <tbody>

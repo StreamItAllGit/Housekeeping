@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useAppState } from '../context/AppStateContext';
+import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import { apiClient } from '../services/apiClient';
 import type { ConfigSnapshotInfo } from '../types/models';
 import { ModalDialog } from './ModalDialog';
@@ -21,7 +22,10 @@ export const SnapshotHistoryDialog: React.FC<SnapshotHistoryDialogProps> = ({ op
     apiClient
       .listSnapshots()
       .then((list) => setSnapshots(list))
-      .catch(() => setSnapshots([]))
+      .catch((err) => {
+        console.debug('[SnapshotHistoryDialog] listSnapshots failed:', err);
+        setSnapshots([]);
+      })
       .finally(() => setLoading(false));
   }, [open]);
 
@@ -62,11 +66,11 @@ export const SnapshotHistoryDialog: React.FC<SnapshotHistoryDialogProps> = ({ op
         <table className="hk-table">
           <thead>
             <tr>
-              <th>Timestamp</th>
-              <th>Jobs</th>
-              <th>Queues</th>
-              <th>Size</th>
-              <th>Action</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.snapshotCol('Snapshot Timestamp')}>Timestamp</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.snapshotCol('Defined Job Count')}>Jobs</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.snapshotCol('Named Queue Count')}>Queues</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.snapshotCol('Serialized File Size')}>Size</th>
+              <th className="hk-has-hint" title={COMMON_UI_HINTS.snapshotCol('Rollback Action')}>Action</th>
             </tr>
           </thead>
           <tbody>

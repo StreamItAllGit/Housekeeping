@@ -153,7 +153,7 @@ namespace Housekeeping.Tests
             }
             finally
             {
-                try { Directory.Delete(rootDir, recursive: true); } catch { }
+                TestCleanupHelper.TryDeleteDirectory(rootDir);
             }
         }
 
@@ -182,7 +182,7 @@ namespace Housekeeping.Tests
             }
             finally
             {
-                try { Directory.Delete(tempDir, recursive: true); } catch { }
+                TestCleanupHelper.TryDeleteDirectory(tempDir);
             }
         }
 
@@ -268,7 +268,7 @@ namespace Housekeeping.Tests
             }
             finally
             {
-                try { Directory.Delete(installDir, recursive: true); } catch { }
+                TestCleanupHelper.TryDeleteDirectory(installDir);
             }
         }
     }

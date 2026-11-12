@@ -9,6 +9,8 @@ namespace Housekeeping.Server.Hosting
     {
         public bool ShowHelp { get; set; }
         public bool ShowVersion { get; set; }
+        public bool RunStatus { get; set; }
+        public bool RunRepairConfig { get; set; }
         public bool StartMinimized { get; set; }
         public bool IsWatchdog { get; set; }
         public bool ManagedByMother { get; set; }
@@ -55,6 +57,14 @@ namespace Housekeeping.Server.Hosting
                          string.Equals(a, "-v", StringComparison.OrdinalIgnoreCase))
                 {
                     result.ShowVersion = true;
+                }
+                else if (string.Equals(a, "--status", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.RunStatus = true;
+                }
+                else if (string.Equals(a, "--repair-config", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.RunRepairConfig = true;
                 }
                 else if (string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase))
@@ -197,6 +207,8 @@ namespace Housekeeping.Server.Hosting
             sb.AppendLine("  --port <1-65535>       Override Kestrel HTTP listening port (Env: HOUSEKEEPING_PORT, PORT)");
             sb.AppendLine("  --localhost-only       Bind strictly to 127.0.0.1 loopback (disable LAN/Tailnet listener)");
             sb.AppendLine("  --headless             Run Kestrel + SignalR server directly without System Tray or WebView2 GUI");
+            sb.AppendLine("  --status               Print one-shot JSON daemon & configuration status and exit");
+            sb.AppendLine("  --repair-config        Validate, migrate, or quarantine/recover settings.json and exit");
             sb.AppendLine("  --test-mode            Enable sandboxed test mode (suppresses host Registry, Task Scheduler,");
             sb.AppendLine("                         Tailscale Serve, and OS sleep/shutdown mutations; Env: HOUSEKEEPING_TEST_MODE=1)");
             sb.AppendLine("  --dry-run              Force all pipeline and job dispatches into non-destructive dry-run mode");

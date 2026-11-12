@@ -41,11 +41,13 @@ namespace Housekeeping.Server.Endpoints
     public sealed record ResumeInterruptedPayload(bool RestartFullQueue = false);
     public sealed record DeferSchedulerPayload(int Minutes = 15);
 
-    public static class HousekeepingApiEndpoints
+    public static partial class HousekeepingApiEndpoints
     {
         public static void MapHousekeepingApi(this WebApplication app)
         {
             var api = app.MapGroup("/api/v1");
+            app.MapCoexistenceAndControlEndpoints(api);
+            app.MapSystemDoctorAndBackupEndpoints(api);
 
             // ==================== MOTHER DISK ARBITRATION HOOKS ==================== //
             var getSchedulerStatus = (HousekeepingRuntimeContainer rt) =>
@@ -493,111 +495,6 @@ namespace Housekeeping.Server.Endpoints
             {
                 var remotes = await rt.Dependencies.RefreshRcloneRemotesAsync();
                 return Results.Ok(new { rcloneRemotes = remotes });
-            });
-
-            // ==================== 6. PIPELINE ORCHESTRATION & PENDING SWAPS ==================== //
-            api.MapGet("/pipeline/state", (HousekeepingRuntimeContainer rt) =>
-                Results.Ok(rt.Orchestrator.GetStateSnapshot()));
-
-            api.MapPost("/pipeline/run-queue", ([FromBody] RunQueuePayload? body, HousekeepingRuntimeContainer rt) =>
-            {
-                var (accepted, started, queued, message) = rt.Orchestrator.StartOrEnqueueQueueRun(
-                    body?.QueueId,
-                    isDryRun: body?.IsDryRun ?? false,
-                    triggerSource: (body?.IsDryRun ?? false) ? "DryRun" : "Manual",
-                    forceCloudResync: body?.ForceCloudResync ?? false,
-                    enqueueIfBusy: body?.EnqueueIfBusy ?? true);
-
-                return accepted
-                    ? Results.Ok(new { ok = true, started, queued, message, state = rt.Orchestrator.GetStateSnapshot() })
-                    : Results.Conflict(new { ok = false, started = false, queued = false, error = message, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/run-job/{jobId}", (string jobId, [FromBody] RunJobPayload? body, HousekeepingRuntimeContainer rt) =>
-            {
-                var (accepted, started, queued, message) = rt.Orchestrator.StartOrEnqueueSingleJobRun(
-                    jobId,
-                    isDryRun: body?.IsDryRun ?? false,
-                    forceCloudResync: body?.ForceCloudResync ?? false,
-                    triggerSource: null,
-                    enqueueIfBusy: body?.EnqueueIfBusy ?? true);
-
-                return accepted
-                    ? Results.Ok(new { ok = true, started, queued, message, state = rt.Orchestrator.GetStateSnapshot() })
-                    : Results.Conflict(new { ok = false, started = false, queued = false, error = message, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapGet("/pipeline/pending-runs", (HousekeepingRuntimeContainer rt) =>
-                Results.Ok(rt.Orchestrator.GetPendingRuns()));
-
-            api.MapDelete("/pipeline/pending-runs/{itemKey}", (string itemKey, HousekeepingRuntimeContainer rt) =>
-            {
-                string decoded = Uri.UnescapeDataString(itemKey ?? "");
-                bool removed = rt.Orchestrator.RemovePendingRun(decoded);
-                return Results.Ok(new { ok = true, removed, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/pending-runs/clear", (HousekeepingRuntimeContainer rt) =>
-            {
-                int cleared = rt.Orchestrator.ClearPendingRuns();
-                return Results.Ok(new { ok = true, cleared, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/pause", (HousekeepingRuntimeContainer rt) =>
-            {
-                bool paused = rt.Orchestrator.TogglePause();
-                return Results.Ok(new { ok = true, isPaused = paused, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/suspend", (HousekeepingRuntimeContainer rt) =>
-            {
-                bool suspended = rt.Orchestrator.ToggleSuspendProcess();
-                return Results.Ok(new { ok = true, isSuspended = suspended, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/stop", (HousekeepingRuntimeContainer rt) =>
-            {
-                rt.Orchestrator.StopActiveRun();
-                return Results.Ok(new { ok = true, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/interrupted/resume", ([FromBody] ResumeInterruptedPayload? body, HousekeepingRuntimeContainer rt) =>
-            {
-                var (started, message) = rt.Orchestrator.ResumeInterruptedRun(body?.RestartFullQueue ?? false);
-                return started
-                    ? Results.Ok(new { ok = true, message, state = rt.Orchestrator.GetStateSnapshot() })
-                    : Results.BadRequest(new { ok = false, error = message });
-            });
-
-            api.MapPost("/pipeline/interrupted/dismiss", (HousekeepingRuntimeContainer rt) =>
-            {
-                rt.Orchestrator.DismissInterruptedRun();
-                return Results.Ok(new { ok = true, state = rt.Orchestrator.GetStateSnapshot() });
-            });
-
-            api.MapPost("/pipeline/post-power", ([FromBody] PostPowerPayload body, HousekeepingRuntimeContainer rt) =>
-            {
-                string mode = (body?.Action ?? "StayAwake").Trim();
-                if (mode is not ("StayAwake" or "Sleep" or "Shutdown"))
-                    mode = "StayAwake";
-                if (!rt.ConfigService.MutateAndSave(cfg => cfg.PostRunPowerAction = mode, out string? err))
-                    return Results.BadRequest(new { error = err ?? "Failed to update post-run power action." });
-                return Results.Ok(new { ok = true, postRunPowerAction = mode });
-            });
-
-            api.MapGet("/pipeline/pending-swaps", (HousekeepingRuntimeContainer rt) =>
-                Results.Ok(rt.PendingSwaps.GetAll()));
-
-            api.MapPost("/pipeline/pending-swaps/retry", async (HousekeepingRuntimeContainer rt) =>
-            {
-                int committed = await rt.Orchestrator.RetryPendingSwapsAsync();
-                return Results.Ok(new { ok = true, committed, remaining = rt.PendingSwaps.Count });
-            });
-
-            api.MapPost("/pipeline/pending-swaps/discard", (HousekeepingRuntimeContainer rt) =>
-            {
-                rt.Orchestrator.DiscardPendingSwaps();
-                return Results.Ok(new { ok = true, remaining = rt.PendingSwaps.Count });
             });
 
             // ==================== 7. TERMINAL & INTERACTIVE CLI ==================== //
@@ -1409,163 +1306,6 @@ namespace Housekeeping.Server.Endpoints
                 rt.Orchestrator.Log("INFO", "[Tailscale PWA] Reset local tailscale serve HTTPS proxy configuration.");
                 return Results.Ok(status);
             });
-
-            // ==================== 12. SYSTEM DOCTOR & BACKUP OPERATIONS ==================== //
-            api.MapPost("/system/backup/now", (HousekeepingRuntimeContainer rt) =>
-            {
-                try
-                {
-                    string dataDir = rt.ConfigService.DataDirectory;
-                    string backupDir = Path.Combine(dataDir, "backups");
-                    Directory.CreateDirectory(backupDir);
-
-                    string stamp = DateTime.UtcNow.ToString("yyyyMMdd_HHmmss");
-                    rt.ConfigService.Save();
-
-                    string szExe = rt.Dependencies.ResolveSevenZip();
-                    string arc7z = Path.Combine(backupDir, $"housekeeping_backup_{stamp}.7z");
-                    bool created7z = false;
-
-                    if (!string.IsNullOrWhiteSpace(szExe) && File.Exists(szExe))
-                    {
-                        string settingsPath = Path.Combine(dataDir, "settings.json");
-                        string historyPath = Path.Combine(dataDir, "history.json");
-                        var psi = new ProcessStartInfo
-                        {
-                            FileName = szExe,
-                            Arguments = $"a -t7z -mx=9 \"{arc7z}\" \"{settingsPath}\" \"{historyPath}\"",
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        };
-                        using var proc = Process.Start(psi);
-                        proc?.WaitForExit(8000);
-                        created7z = File.Exists(arc7z);
-                    }
-
-                    string finalPath = created7z ? arc7z : Path.Combine(backupDir, $"housekeeping_backup_{stamp}.zip");
-                    if (!created7z)
-                    {
-                        if (File.Exists(finalPath)) File.Delete(finalPath);
-                        System.IO.Compression.ZipFile.CreateFromDirectory(dataDir, finalPath);
-                    }
-
-                    rt.Orchestrator.Log("SUCCESS", $"[System Doctor] Created backup: {Path.GetFileName(finalPath)}");
-                    return Results.Ok(new
-                    {
-                        ok = true,
-                        backupPath = finalPath,
-                        fileName = Path.GetFileName(finalPath),
-                        format = created7z ? "7z" : "zip"
-                    });
-                }
-                catch (Exception ex)
-                {
-                    return Results.BadRequest(new { ok = false, error = ex.Message });
-                }
-            });
-
-            api.MapGet("/system/doctor/diagnostics", (HousekeepingRuntimeContainer rt) =>
-            {
-                var deps = rt.Dependencies.CheckAllDependencies();
-                var drives = DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => new
-                {
-                    name = d.Name,
-                    driveType = d.DriveType.ToString(),
-                    volumeLabel = d.VolumeLabel,
-                    totalGb = Math.Round((double)d.TotalSize / (1024 * 1024 * 1024), 1),
-                    freeGb = Math.Round((double)d.AvailableFreeSpace / (1024 * 1024 * 1024), 1),
-                    isReady = d.IsReady
-                }).ToList();
-
-                return Results.Ok(new
-                {
-                    appVersion = RemoteNodeDeploymentService.GetLocalAppVersion(),
-                    machineName = Environment.MachineName,
-                    osVersion = Environment.OSVersion.ToString(),
-                    isTestMode = rt.ConfigService.IsTestMode,
-                    isSandboxed = rt.ConfigService.IsSandboxed,
-                    dependencies = deps,
-                    drives
-                });
-            });
-
-            api.MapPost("/system/doctor/export-bundle", (HousekeepingRuntimeContainer rt) =>
-            {
-                try
-                {
-                    string logsDir = Path.Combine(AppContext.BaseDirectory, "logs");
-                    Directory.CreateDirectory(logsDir);
-                    string diagName = $"Housekeeping_Diagnostics_{DateTime.UtcNow:yyyyMMdd_HHmmss}.json";
-                    string diagPath = Path.Combine(logsDir, diagName);
-
-                    var report = new
-                    {
-                        appName = "Housekeeping",
-                        version = RemoteNodeDeploymentService.GetLocalAppVersion(),
-                        machine = Environment.MachineName,
-                        os = Environment.OSVersion.ToString(),
-                        timestampUtc = DateTime.UtcNow.ToString("o"),
-                        isTestMode = rt.ConfigService.IsTestMode,
-                        isSandboxed = rt.ConfigService.IsSandboxed,
-                        dependencies = rt.Dependencies.CheckAllDependencies(),
-                        drives = DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => new
-                        {
-                            name = d.Name,
-                            volumeLabel = d.VolumeLabel,
-                            totalGb = Math.Round((double)d.TotalSize / (1024 * 1024 * 1024), 1),
-                            freeGb = Math.Round((double)d.AvailableFreeSpace / (1024 * 1024 * 1024), 1)
-                        }).ToList(),
-                        recentLogs = rt.LogBuffer.GetRecentEntries(150).Select(e => e.FormattedLine).ToList()
-                    };
-
-                    string json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });
-                    File.WriteAllText(diagPath, json);
-                    rt.Orchestrator.Log("SUCCESS", $"[System Doctor] Exported diagnostic bundle: {diagName}");
-                    return Results.File(Encoding.UTF8.GetBytes(json), "application/json", diagName);
-                }
-                catch (Exception ex)
-                {
-                    return Results.BadRequest(new { ok = false, error = ex.Message });
-                }
-            });
-
-            var postSystemShutdown = (HttpContext ctx, IHostApplicationLifetime lifetime, TieredAuthService auth, HousekeepingRuntimeContainer rt) =>
-            {
-                var eval = ctx.Items[TieredAuthMiddleware.AuthResultItemKey] as AuthEvaluationResult ?? auth.EvaluateRequest(ctx);
-                if (!eval.IsDirectLoopback && !eval.IsAuthenticated)
-                {
-                    return Results.StatusCode(StatusCodes.Status403Forbidden);
-                }
-
-                rt.Orchestrator.Log("INFO", "[System] Received HTTP graceful shutdown signal via /api/v1/system/shutdown.");
-                if (rt.Orchestrator.IsRunning)
-                {
-                    rt.Orchestrator.StopActiveRun();
-                }
-
-                _ = Task.Run(async () =>
-                {
-                    await Task.Delay(250);
-                    try
-                    {
-                        lifetime.StopApplication();
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[HousekeepingApiEndpoints] StopApplication error ignored: {ex.Message}");
-                    }
-                });
-
-                return Results.Ok(new
-                {
-                    ok = true,
-                    status = "shutting_down",
-                    timestamp = DateTime.UtcNow
-                });
-            };
-
-            api.MapPost("/system/shutdown", postSystemShutdown);
-            app.MapPost("/api/system/shutdown", postSystemShutdown);
         }
 
         private static bool HasRestrictedExecutionSurfaceChanged(AppConfig existing, AppConfig incoming)
@@ -1664,12 +1404,6 @@ namespace Housekeeping.Server.Endpoints
             return Enum.TryParse<SidecarVerifyMode>(trimmed, ignoreCase: true, out var parsed)
                 ? parsed
                 : SidecarVerifyMode.FastHeaderAndHeal;
-        }
-
-        private static T SafeRead<T>(Func<T> fn, T fallback)
-        {
-            try { return fn(); }
-            catch { return fallback; }
         }
     }
 }

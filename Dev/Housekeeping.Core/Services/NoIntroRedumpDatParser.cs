@@ -17,124 +17,9 @@ namespace Housekeeping.Services
         public string RomFileName { get; set; } = "";
         public long Size { get; set; }
         public string Crc32 { get; set; } = "";
+        public string Md5 { get; set; } = "";
         public string Sha1 { get; set; } = "";
         public string DatTitle { get; set; } = "";
-    }
-
-    public static class DatTitleNormalizer
-    {
-        private static readonly Regex CustomTagRegex = new(
-            @"\((?:PR|PRt|RH|Hack|Homebrew|Proto|Beta|Sample|Demo|Unl|Alt|DumpTag|Launcher)[^\)]*\)|\[[^\]]+\]",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-        private static readonly Regex PunctuationRegex = new(
-            @"[;:_\-–—.,'""()\[\]{}/\\\s]+",
-            RegexOptions.Compiled);
-
-        private static readonly Regex ArticleRegex = new(
-            @"\b(the|a|an)\b",
-            RegexOptions.Compiled | RegexOptions.IgnoreCase);
-
-        private static readonly Regex MultiSpaceRegex = new(
-            @"\s+",
-            RegexOptions.Compiled);
-
-        public static bool HasCustomTag(string? name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return false;
-            return CustomTagRegex.IsMatch(name);
-        }
-
-        public static string CleanUserTags(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return "";
-            string s = CustomTagRegex.Replace(name, " ");
-            return MultiSpaceRegex.Replace(s, " ").Trim();
-        }
-
-        public static string NormalizeSlug(string name)
-        {
-            if (string.IsNullOrWhiteSpace(name)) return "";
-            string cleaned = CleanUserTags(name);
-
-            // Strip diacritics / accents (e.g. Pokémon -> Pokemon)
-            string formD = cleaned.Normalize(NormalizationForm.FormD);
-            var sb = new StringBuilder(formD.Length);
-            foreach (char c in formD)
-            {
-                var uc = CharUnicodeInfo.GetUnicodeCategory(c);
-                if (uc != UnicodeCategory.NonSpacingMark)
-                {
-                    sb.Append(c);
-                }
-            }
-            string noAccents = sb.ToString();
-
-            // Strip articles (The, A, An)
-            string noArticles = ArticleRegex.Replace(noAccents, " ");
-
-            // Remove punctuation
-            string noPunct = PunctuationRegex.Replace(noArticles, " ");
-
-            // Retain only lowercase alphanumeric
-            var cleanSlug = new StringBuilder(noPunct.Length);
-            foreach (char c in noPunct)
-            {
-                if (char.IsLetterOrDigit(c))
-                {
-                    cleanSlug.Append(char.ToLowerInvariant(c));
-                }
-            }
-
-            return cleanSlug.ToString();
-        }
-
-        public static double CalculateSimilarity(string s1, string s2)
-        {
-            if (string.IsNullOrEmpty(s1) && string.IsNullOrEmpty(s2)) return 1.0;
-            if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2)) return 0.0;
-            if (s1.Equals(s2, StringComparison.OrdinalIgnoreCase)) return 1.0;
-
-            int len1 = s1.Length;
-            int len2 = s2.Length;
-            int maxLen = Math.Max(len1, len2);
-
-            // Single-row Levenshtein distance using stackalloc / ArrayPool (zero 2D array heap allocation)
-            int[]? rented = null;
-            Span<int> row = len2 + 1 <= 256
-                ? stackalloc int[len2 + 1]
-                : (rented = ArrayPool<int>.Shared.Rent(len2 + 1)).AsSpan(0, len2 + 1);
-
-            try
-            {
-                for (int j = 0; j <= len2; j++)
-                    row[j] = j;
-
-                for (int i = 1; i <= len1; i++)
-                {
-                    int prevDiag = row[0];
-                    row[0] = i;
-                    char c1 = s1[i - 1];
-
-                    for (int j = 1; j <= len2; j++)
-                    {
-                        int temp = row[j];
-                        int cost = (c1 == s2[j - 1]) ? 0 : 1;
-                        row[j] = Math.Min(
-                            Math.Min(row[j] + 1, row[j - 1] + 1),
-                            prevDiag + cost);
-                        prevDiag = temp;
-                    }
-                }
-
-                return 1.0 - (double)row[len2] / maxLen;
-            }
-            finally
-            {
-                if (rented != null)
-                    ArrayPool<int>.Shared.Return(rented);
-            }
-        }
     }
 
     public class MultiFileDatEvaluation
@@ -591,7 +476,7 @@ namespace Housekeeping.Services
             RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase);
 
         private static readonly Regex ClrMameRomLineRegex = new(
-            @"rom\s*\(\s*name\s+""(?<rom>[^""]+)""(?:\s+size\s+(?<size>\d+))?(?:\s+crc\s+(?<crc>[a-fA-F0-9]+))?(?:\s+md5\s+[a-fA-F0-9]+)?(?:\s+sha1\s+(?<sha1>[a-fA-F0-9]+))?",
+            @"rom\s*\(\s*name\s+""(?<rom>[^""]+)""(?:\s+size\s+(?<size>\d+))?(?:\s+crc\s+(?<crc>[a-fA-F0-9]+))?(?:\s+md5\s+(?<md5>[a-fA-F0-9]+))?(?:\s+sha1\s+(?<sha1>[a-fA-F0-9]+))?",
             RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
         private static readonly Regex NonAlphanumericKeyRegex = new(
@@ -650,6 +535,7 @@ namespace Housekeeping.Services
                             {
                                 string romName = reader.GetAttribute("name") ?? "";
                                 string crc = reader.GetAttribute("crc") ?? "";
+                                string md5 = reader.GetAttribute("md5") ?? "";
                                 string sha1 = reader.GetAttribute("sha1") ?? "";
                                 string sizeStr = reader.GetAttribute("size") ?? "0";
                                 long.TryParse(sizeStr, out long size);
@@ -659,6 +545,7 @@ namespace Housekeeping.Services
                                     GameName = string.IsNullOrWhiteSpace(currentGame) ? Path.GetFileNameWithoutExtension(romName) : currentGame,
                                     RomFileName = romName,
                                     Crc32 = crc.ToUpperInvariant(),
+                                    Md5 = md5.ToUpperInvariant(),
                                     Sha1 = sha1.ToUpperInvariant(),
                                     Size = size,
                                     DatTitle = Path.GetFileNameWithoutExtension(datFilePath)
@@ -675,9 +562,9 @@ namespace Housekeeping.Services
                     }
                 }
             }
-            catch
+            catch (Exception xmlEx)
             {
-                // If XML parse failed, fall through to text/ClrMamePro parser
+                System.Diagnostics.Debug.WriteLine($"[NoIntroRedumpDatParser] XML parse fallback to ClrMamePro for '{Path.GetFileName(fullPath)}': {xmlEx.Message}");
             }
 
             // Fallback: parse as ClrMamePro text format
@@ -705,6 +592,7 @@ namespace Housekeeping.Services
                     {
                         string rom = rm.Groups["rom"].Value;
                         string crc = rm.Groups["crc"].Value;
+                        string md5 = rm.Groups["md5"].Value;
                         string sha1 = rm.Groups["sha1"].Value;
                         long.TryParse(rm.Groups["size"].Value, out long size);
 
@@ -713,6 +601,7 @@ namespace Housekeeping.Services
                             GameName = name,
                             RomFileName = string.IsNullOrWhiteSpace(rom) ? name : rom,
                             Crc32 = crc.ToUpperInvariant(),
+                            Md5 = md5.ToUpperInvariant(),
                             Sha1 = sha1.ToUpperInvariant(),
                             Size = size,
                             DatTitle = Path.GetFileNameWithoutExtension(datFilePath)

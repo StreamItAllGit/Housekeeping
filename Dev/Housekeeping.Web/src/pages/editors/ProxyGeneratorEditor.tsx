@@ -1,7 +1,12 @@
+// @module: Housekeeping.Web/pages/editors/ProxyGeneratorEditor
+// @purpose: Module 2 (Proxy Media Generator) editor with ProfileSelect dropdown and 2-line hover hints.
+// @depends-on: react, ../../components/HybridPathPicker, ../../components/ProfileSelect, ../../context/AppStateContext, ../../hints/proxyGenerator, ../../types/models
+// @exports: ProxyGeneratorEditor
 import React from 'react';
-import { ComboSelect } from '../../components/ComboSelect';
 import { HybridPathPicker } from '../../components/HybridPathPicker';
+import { ProfileSelect } from '../../components/ProfileSelect';
 import { useAppState } from '../../context/AppStateContext';
+import { PROXY_GENERATOR_HINTS } from '../../hints/proxyGenerator';
 import type { ProxyGeneratorConfig } from '../../types/models';
 
 interface Props {
@@ -20,7 +25,7 @@ export const ProxyGeneratorEditor: React.FC<Props> = ({ cfg, onChange }) => {
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
           Scans working footage folders and generates fast, low-bitrate editing proxies right beside
           source files (for example <code>Clip01 (360p_proxy).mp4</code>) while automatically skipping
-          existing proxies.
+          existing proxies and StreamEngine <code>.hklock</code> directories.
         </div>
       </div>
 
@@ -29,11 +34,11 @@ export const ProxyGeneratorEditor: React.FC<Props> = ({ cfg, onChange }) => {
         <div className="hk-grid-3" style={{ marginTop: 10 }}>
           <div className="hk-field">
             <label className="hk-field-label">HandBrake Encoding Profile</label>
-            <ComboSelect
+            <ProfileSelect
               value={cfg.HandBrakeProfileId}
               options={profileIds}
+              ariaLabel="Proxy HandBrake encoding profile"
               onChange={(v) => onChange((d) => (d.HandBrakeProfileId = v))}
-              placeholder="Proxy_360p"
             />
           </div>
           <div className="hk-field">
@@ -77,11 +82,7 @@ export const ProxyGeneratorEditor: React.FC<Props> = ({ cfg, onChange }) => {
           <button
             type="button"
             className="hk-btn sm primary"
-            onClick={() =>
-              onChange((d) => {
-                d.Folders.push({ Enabled: true, Path: '' });
-              })
-            }
+            onClick={() => onChange((d) => d.Folders.push({ Enabled: true, Path: '' }))}
           >
             + Add Folder
           </button>
@@ -91,9 +92,15 @@ export const ProxyGeneratorEditor: React.FC<Props> = ({ cfg, onChange }) => {
           <table className="hk-table stack-mobile">
             <thead>
               <tr>
-                <th style={{ width: 70 }}>Enabled</th>
-                <th>Folder Path (Local or UNC)</th>
-                <th style={{ width: 90 }}>Action</th>
+                <th className="hk-has-hint" style={{ width: 70 }} title={PROXY_GENERATOR_HINTS.thEnabled}>
+                  Enabled
+                </th>
+                <th className="hk-has-hint" title={PROXY_GENERATOR_HINTS.thFolderPath}>
+                  Folder Path (Local or UNC)
+                </th>
+                <th className="hk-has-hint" style={{ width: 90 }} title={PROXY_GENERATOR_HINTS.thAction}>
+                  Action
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -109,6 +116,8 @@ export const ProxyGeneratorEditor: React.FC<Props> = ({ cfg, onChange }) => {
                   <td data-label="Enabled">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={PROXY_GENERATOR_HINTS.folderEnabled}
                       checked={row.Enabled}
                       onChange={(e) =>
                         onChange((d) => {
@@ -132,11 +141,7 @@ export const ProxyGeneratorEditor: React.FC<Props> = ({ cfg, onChange }) => {
                     <button
                       type="button"
                       className="hk-btn sm danger"
-                      onClick={() =>
-                        onChange((d) => {
-                          d.Folders.splice(idx, 1);
-                        })
-                      }
+                      onClick={() => onChange((d) => d.Folders.splice(idx, 1))}
                     >
                       Remove
                     </button>

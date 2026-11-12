@@ -128,29 +128,16 @@ namespace Housekeeping.Services
 
                     // Probe exclusive read/write access on WorkingPath first so a locked .partial file
                     // NEVER deletes or modifies an existing TargetPath.
-                    try
+                    if (!NetworkSafetyService.TryProbeExclusiveAccess(item.WorkingPath, out string? workErr))
                     {
-                        File.SetAttributes(item.WorkingPath, FileAttributes.Normal);
-                        using var workingProbe = new FileStream(item.WorkingPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-                    }
-                    catch (Exception exWork)
-                    {
-                        log?.Invoke("NET", $"[PendingSwap] Working file '{Path.GetFileName(item.WorkingPath)}' is still locked ({exWork.Message}).");
+                        log?.Invoke("NET", $"[PendingSwap] Working file '{Path.GetFileName(item.WorkingPath)}' is still locked ({workErr}).");
                         return false;
                     }
 
-                    if (File.Exists(item.TargetPath))
+                    if (File.Exists(item.TargetPath) && !NetworkSafetyService.TryProbeExclusiveAccess(item.TargetPath, out string? destErr))
                     {
-                        try
-                        {
-                            File.SetAttributes(item.TargetPath, FileAttributes.Normal);
-                            using var targetProbe = new FileStream(item.TargetPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-                        }
-                        catch (Exception exTarget)
-                        {
-                            log?.Invoke("NET", $"[PendingSwap] Destination '{Path.GetFileName(item.TargetPath)}' is still locked ({exTarget.Message}).");
-                            return false;
-                        }
+                        log?.Invoke("NET", $"[PendingSwap] Destination '{Path.GetFileName(item.TargetPath)}' is still locked ({destErr}).");
+                        return false;
                     }
 
                     File.Move(item.WorkingPath, item.TargetPath, overwrite: true);

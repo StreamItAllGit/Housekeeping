@@ -1,5 +1,10 @@
+// @module: Housekeeping.Web/components/ArchiveTemplateEditorDialog
+// @purpose: Modal dialog for inspecting built-in archive compliance templates and editing custom cloned rulesets.
+// @depends-on: react, ../context/AppStateContext, ../hints/commonDialogs, ../types/models, ./ModalDialog
+// @exports: ArchiveTemplateEditorDialog
 import React, { useEffect, useState } from 'react';
 import { useAppState } from '../context/AppStateContext';
+import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import type { ArchiveComplianceTemplate } from '../types/models';
 import { ModalDialog } from './ModalDialog';
 
@@ -22,7 +27,10 @@ export const ArchiveTemplateEditorDialog: React.FC<ArchiveTemplateEditorDialogPr
 
   useEffect(() => {
     if (!open) return;
-    const base = templates && templates.length > 0 ? structuredClone(templates) : structuredClone(builtInArchiveTemplates);
+    const base =
+      templates && templates.length > 0
+        ? structuredClone(templates)
+        : structuredClone(builtInArchiveTemplates);
     setLocalList(base);
     setSelectedId(base[0]?.TemplateId || '');
   }, [builtInArchiveTemplates, open, templates]);
@@ -63,6 +71,80 @@ export const ArchiveTemplateEditorDialog: React.FC<ArchiveTemplateEditorDialogPr
     setLocalList(next);
     setSelectedId(next[0]?.TemplateId || '');
   };
+
+  const toggleSpecs: Array<{
+    label: string;
+    hint: string;
+    getVal: (t: ArchiveComplianceTemplate) => boolean;
+    setVal: (t: ArchiveComplianceTemplate, v: boolean) => void;
+  }> = [
+    {
+      label: 'Inherit Allowed Payloads from Console Rule',
+      hint: COMMON_UI_HINTS.tplInheritExts,
+      getVal: (t) => t.UseConsoleRuleExtensionsAsPayloads,
+      setVal: (t, v) => (t.UseConsoleRuleExtensionsAsPayloads = v),
+    },
+    {
+      label: 'Require Outer .7z / .zip Container',
+      hint: COMMON_UI_HINTS.tplRequireArchive,
+      getVal: (t) => t.RequireArchivedContainer,
+      setVal: (t, v) => (t.RequireArchivedContainer = v),
+    },
+    {
+      label: 'Allow Unpacked Folder Dump Targets',
+      hint: COMMON_UI_HINTS.tplAllowFolderTargets,
+      getVal: (t) => t.AllowUnpackedFolderTargets,
+      setVal: (t, v) => (t.AllowUnpackedFolderTargets = v),
+    },
+    {
+      label: 'Allow Single Top-Level Wrapper Folder',
+      hint: COMMON_UI_HINTS.tplAllowSingleWrapper,
+      getVal: (t) => t.AllowSingleWrapperFolder,
+      setVal: (t, v) => (t.AllowSingleWrapperFolder = v),
+    },
+    {
+      label: 'Require .cue / .gdi Descriptor for Raw .bin Tracks',
+      hint: COMMON_UI_HINTS.tplRequireCueGdi,
+      getVal: (t) => t.RequireCueOrGdiForRawBinTracks,
+      setVal: (t, v) => (t.RequireCueOrGdiForRawBinTracks = v),
+    },
+    {
+      label: 'Validate .cue / .gdi / .m3u Referenced Tracks Exist',
+      hint: COMMON_UI_HINTS.tplValidateTrackRefs,
+      getVal: (t) => t.ValidateCueGdiM3uReferences,
+      setVal: (t, v) => (t.ValidateCueGdiM3uReferences = v),
+    },
+    {
+      label: 'Flag Orphan Unreferenced .bin Tracks',
+      hint: COMMON_UI_HINTS.tplFlagOrphanBins,
+      getVal: (t) => t.FlagOrphanTrackBins,
+      setVal: (t, v) => (t.FlagOrphanTrackBins = v),
+    },
+    {
+      label: 'Validate Multi-Disc Sequence Continuity (Disc 1..N)',
+      hint: COMMON_UI_HINTS.tplMultiDiscSeq,
+      getVal: (t) => t.ValidateMultiDiscSequenceContinuity,
+      setVal: (t, v) => (t.ValidateMultiDiscSequenceContinuity = v),
+    },
+    {
+      label: 'Flag Nested Archives (.zip/.7z/.rar inside Archive)',
+      hint: COMMON_UI_HINTS.tplFlagNestedArchives,
+      getVal: (t) => t.FlagNestedArchives,
+      setVal: (t, v) => (t.FlagNestedArchives = v),
+    },
+    {
+      label: 'Validate Folder Dump Boot Anchors (PS3_DISC.SFB / meta.xml)',
+      hint: COMMON_UI_HINTS.tplBootAnchors,
+      getVal: (t) => t.ValidateFolderDumpBootAnchors,
+      setVal: (t, v) => (t.ValidateFolderDumpBootAnchors = v),
+    },
+    {
+      label: 'Flag PS3_UPDATE.PUP Firmware Bloat',
+      hint: COMMON_UI_HINTS.tplFlagPs3Pup,
+      getVal: (t) => t.FlagPs3UpdatePupBloat,
+      setVal: (t, v) => (t.FlagPs3UpdatePupBloat = v),
+    },
+  ];
 
   return (
     <ModalDialog
@@ -207,137 +289,19 @@ export const ArchiveTemplateEditorDialog: React.FC<ArchiveTemplateEditorDialogPr
               </div>
 
               <div className="hk-grid-2">
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.UseConsoleRuleExtensionsAsPayloads}
-                    onChange={(e) =>
-                      updateActive((t) => (t.UseConsoleRuleExtensionsAsPayloads = e.target.checked))
-                    }
-                  />
-                  Inherit Allowed Payloads from Console Rule
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.RequireArchivedContainer}
-                    onChange={(e) =>
-                      updateActive((t) => (t.RequireArchivedContainer = e.target.checked))
-                    }
-                  />
-                  Require Outer .7z / .zip Container
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.AllowUnpackedFolderTargets}
-                    onChange={(e) =>
-                      updateActive((t) => (t.AllowUnpackedFolderTargets = e.target.checked))
-                    }
-                  />
-                  Allow Unpacked Folder Dump Targets
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.AllowSingleWrapperFolder}
-                    onChange={(e) =>
-                      updateActive((t) => (t.AllowSingleWrapperFolder = e.target.checked))
-                    }
-                  />
-                  Allow Single Top-Level Wrapper Folder
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.RequireCueOrGdiForRawBinTracks}
-                    onChange={(e) =>
-                      updateActive((t) => (t.RequireCueOrGdiForRawBinTracks = e.target.checked))
-                    }
-                  />
-                  Require .cue / .gdi Descriptor for Raw .bin Tracks
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.ValidateCueGdiM3uReferences}
-                    onChange={(e) =>
-                      updateActive((t) => (t.ValidateCueGdiM3uReferences = e.target.checked))
-                    }
-                  />
-                  Validate .cue / .gdi / .m3u Referenced Tracks Exist
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.FlagOrphanTrackBins}
-                    onChange={(e) =>
-                      updateActive((t) => (t.FlagOrphanTrackBins = e.target.checked))
-                    }
-                  />
-                  Flag Orphan Unreferenced .bin Tracks
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.ValidateMultiDiscSequenceContinuity}
-                    onChange={(e) =>
-                      updateActive((t) => (t.ValidateMultiDiscSequenceContinuity = e.target.checked))
-                    }
-                  />
-                  Validate Multi-Disc Sequence Continuity (Disc 1..N)
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.FlagNestedArchives}
-                    onChange={(e) =>
-                      updateActive((t) => (t.FlagNestedArchives = e.target.checked))
-                    }
-                  />
-                  Flag Nested Archives (.zip/.7z/.rar inside Archive)
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.ValidateFolderDumpBootAnchors}
-                    onChange={(e) =>
-                      updateActive((t) => (t.ValidateFolderDumpBootAnchors = e.target.checked))
-                    }
-                  />
-                  Validate Folder Dump Boot Anchors (PS3_DISC.SFB / meta.xml)
-                </label>
-
-                <label className="hk-checkbox-label">
-                  <input
-                    type="checkbox"
-                    disabled={isReadOnlyBuiltIn}
-                    checked={active.FlagPs3UpdatePupBloat}
-                    onChange={(e) =>
-                      updateActive((t) => (t.FlagPs3UpdatePupBloat = e.target.checked))
-                    }
-                  />
-                  Flag PS3_UPDATE.PUP Firmware Bloat
-                </label>
+                {toggleSpecs.map((spec) => (
+                  <label key={spec.label} className="hk-checkbox-label hk-has-hint" title={spec.hint}>
+                    <input
+                      type="checkbox"
+                      className="hk-has-hint"
+                      title={spec.hint}
+                      disabled={isReadOnlyBuiltIn}
+                      checked={spec.getVal(active)}
+                      onChange={(e) => updateActive((t) => spec.setVal(t, e.target.checked))}
+                    />
+                    {spec.label}
+                  </label>
+                ))}
 
                 <div className="hk-field">
                   <label className="hk-field-label">

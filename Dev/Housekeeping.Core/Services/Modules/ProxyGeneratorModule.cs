@@ -44,6 +44,13 @@ namespace Housekeeping.Services.Modules
                     continue;
                 }
 
+                if (NetworkSafetyService.HasActiveDirectoryOrParentLock(path, "housekeeping", out string? activeOwner, out string? activeLock, scanImmediateSubdirectories: true, ctx.Log))
+                {
+                    ctx.Log("WARN", $"[Coexistence Defer] Deferring Proxy Generator on '{path}' — active sentinel lock '{activeLock}' held by '{activeOwner}'.");
+                    ctx.Stats.Skipped++;
+                    continue;
+                }
+
                 var dirInfo = new DirectoryInfo(path);
                 var files = new List<FileInfo>();
                 var safeEnumOpts = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = true };
@@ -61,7 +68,7 @@ namespace Housekeeping.Services.Modules
                     }
                 }
 
-                files = files.Where(f => !f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase)).ToList();
+                files = files.Where(f => !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name)).ToList();
                 ctx.Log("INFO", $"Found {files.Count} media file(s) in '{dirInfo.Name}'.");
 
                 int number = 0;

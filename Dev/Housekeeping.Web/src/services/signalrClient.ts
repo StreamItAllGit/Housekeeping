@@ -70,7 +70,8 @@ export class HousekeepingSignalRClient {
     try {
       await conn.start();
       callbacks.onConnectionChanged(true);
-    } catch {
+    } catch (err) {
+      console.debug('[SignalR] connection start deferred:', err);
       callbacks.onConnectionChanged(false);
     }
   }
@@ -81,8 +82,8 @@ export class HousekeepingSignalRClient {
       this.connection = null;
       try {
         await prev.stop();
-      } catch {
-        // ignore stop errors
+      } catch (err) {
+        console.debug('[SignalR] stop skipped:', err);
       }
     }
   }

@@ -5,78 +5,11 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 
 namespace Housekeeping.Services
 {
-    public sealed class CrashBundleDto
-    {
-        [JsonPropertyName("schema_version")]
-        public string SchemaVersion { get; set; } = "1.0";
-
-        [JsonPropertyName("crash_id")]
-        public string CrashId { get; set; } = "";
-
-        [JsonPropertyName("timestamp_utc")]
-        public string TimestampUtc { get; set; } = "";
-
-        [JsonPropertyName("app_name")]
-        public string AppName { get; set; } = "Housekeeping";
-
-        [JsonPropertyName("build_version")]
-        public string BuildVersion { get; set; } = "";
-
-        [JsonPropertyName("archetype")]
-        public string Archetype { get; set; } = "2-tray-companion";
-
-        [JsonPropertyName("test_mode")]
-        public bool TestMode { get; set; }
-
-        [JsonPropertyName("process")]
-        public CrashProcessInfoDto Process { get; set; } = new();
-
-        [JsonPropertyName("exception")]
-        public CrashExceptionInfoDto Exception { get; set; } = new();
-
-        [JsonPropertyName("preceding_log_ring_buffer")]
-        public List<string> PrecedingLogRingBuffer { get; set; } = new();
-    }
-
-    public sealed class CrashProcessInfoDto
-    {
-        [JsonPropertyName("pid")]
-        public int Pid { get; set; }
-
-        [JsonPropertyName("uptime_seconds")]
-        public long UptimeSeconds { get; set; }
-
-        [JsonPropertyName("command_line_sanitized")]
-        public string CommandLineSanitized { get; set; } = "";
-    }
-
-    public sealed class CrashExceptionInfoDto
-    {
-        [JsonPropertyName("type")]
-        public string Type { get; set; } = "";
-
-        [JsonPropertyName("message")]
-        public string Message { get; set; } = "";
-
-        [JsonPropertyName("failing_module")]
-        public string FailingModule { get; set; } = "";
-
-        [JsonPropertyName("failing_file")]
-        public string FailingFile { get; set; } = "";
-
-        [JsonPropertyName("failing_line")]
-        public int FailingLine { get; set; }
-
-        [JsonPropertyName("stack_trace")]
-        public List<string> StackTrace { get; set; } = new();
-    }
-
     public static class CrashBundleService
     {
         public const int MaxRetainedCrashBundles = 20;
@@ -84,10 +17,7 @@ namespace Housekeeping.Services
 
         private static readonly object SyncLock = new();
         private static readonly DateTime ProcessStartedAtUtc = DateTime.UtcNow;
-        private static readonly JsonSerializerOptions BundleJsonOptions = new()
-        {
-            WriteIndented = true
-        };
+        private static readonly JsonSerializerOptions BundleJsonOptions = new() { WriteIndented = true };
 
         private static readonly Regex UserProfileRegex = new(
             @"(?i)[A-Za-z]:[\\/]+Users[\\/]+(?!Public|Default)[^\\/""'\s:;]+",
@@ -108,7 +38,7 @@ namespace Housekeeping.Services
         private static bool _handlersRegistered;
         private static Func<string>? _logsDirProvider;
         private static Func<TerminalLogBufferService?>? _logBufferProvider;
-        private static string _buildVersion = "1.0.0-rc.11-hf.1";
+        private static string _buildVersion = CrashBundleExceptionFilter.DefaultFallbackVersion;
         private static bool _testMode;
         private static string _archetype = "2-tray-companion";
 
@@ -142,26 +72,38 @@ namespace Housekeeping.Services
                                  ?? new Exception($"Unhandled non-Exception object: {e.ExceptionObject}");
                         WriteCrashBundle(ex);
                     }
-                    catch
+                    catch (Exception handlerEx)
                     {
-                        // Never throw from global unhandled exception handler
+                        Debug.WriteLine($"[CrashBundleService] UnhandledException handler error: {handlerEx.Message}");
                     }
                 };
 
-                TaskScheduler.UnobservedTaskException += (_, e) =>
+                TaskScheduler.UnobservedTaskException += (_, e) => HandleUnobservedTaskException(e);
+            }
+        }
+
+        public static bool HandleUnobservedTaskException(
+            UnobservedTaskExceptionEventArgs e,
+            string? logsDirOverride = null,
+            string? buildVersionOverride = null)
+        {
+            if (e == null) return false;
+            try
+            {
+                e.SetObserved();
+                if (e.Exception == null || CrashBundleExceptionFilter.IsBenignBackgroundException(e.Exception))
                 {
-                    try
-                    {
-                        if (e.Exception != null)
-                        {
-                            WriteCrashBundle(e.Exception.Flatten());
-                        }
-                    }
-                    catch
-                    {
-                        // Never throw from unobserved task handler
-                    }
-                };
+                    Debug.WriteLine($"[CrashBundleService] Suppressed benign unobserved task exception: {e.Exception?.GetBaseException().Message}");
+                    return false;
+                }
+
+                string? written = WriteCrashBundle(e.Exception.Flatten(), logsDirOverride: logsDirOverride, buildVersionOverride: buildVersionOverride);
+                return !string.IsNullOrWhiteSpace(written);
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[CrashBundleService] HandleUnobservedTaskException ignored: {ex.Message}");
+                return false;
             }
         }
 
@@ -173,8 +115,7 @@ namespace Housekeeping.Services
             string? archetypeOverride = null,
             TerminalLogBufferService? logBufferOverride = null)
         {
-            if (ex == null)
-                return null;
+            if (ex == null) return null;
 
             lock (SyncLock)
             {
@@ -188,7 +129,7 @@ namespace Housekeeping.Services
                         ? buildVersionOverride!.Trim()
                         : _buildVersion;
                     if (string.IsNullOrWhiteSpace(version))
-                        version = "1.0.0-rc.11-hf.1";
+                        version = CrashBundleExceptionFilter.DefaultFallbackVersion;
 
                     bool isTestMode = testModeOverride ?? _testMode;
                     string archetype = !string.IsNullOrWhiteSpace(archetypeOverride)
@@ -250,8 +191,9 @@ namespace Housekeeping.Services
                     PruneCrashBundles(crashesDir, MaxRetainedCrashBundles);
                     return bundlePath;
                 }
-                catch
+                catch (Exception writeEx)
                 {
+                    Debug.WriteLine($"[CrashBundleService] WriteCrashBundle failed: {writeEx.Message}");
                     return null;
                 }
             }
@@ -259,9 +201,7 @@ namespace Housekeeping.Services
 
         public static string SanitizeText(string? input)
         {
-            if (string.IsNullOrEmpty(input))
-                return "";
-
+            if (string.IsNullOrEmpty(input)) return "";
             string sanitized = UserProfileRegex.Replace(input, "%USERPROFILE%");
             sanitized = CliSecretRegex.Replace(sanitized, "$1[REDACTED]");
             sanitized = KeyValueSecretRegex.Replace(sanitized, "$1[REDACTED]$3");
@@ -272,34 +212,21 @@ namespace Housekeeping.Services
         {
             try
             {
-                if (!Directory.Exists(crashesDir))
-                    return;
-
+                if (!Directory.Exists(crashesDir)) return;
                 var files = new DirectoryInfo(crashesDir)
                     .GetFiles("crash_*.json")
                     .OrderByDescending(f => f.LastWriteTimeUtc)
                     .ThenByDescending(f => f.Name, StringComparer.OrdinalIgnoreCase)
                     .ToList();
 
-                if (files.Count <= maxRetained)
-                    return;
-
+                if (files.Count <= maxRetained) return;
                 for (int i = maxRetained; i < files.Count; i++)
                 {
-                    try
-                    {
-                        files[i].Delete();
-                    }
-                    catch
-                    {
-                        // Ignore locked or already deleted file
-                    }
+                    try { files[i].Delete(); }
+                    catch (Exception delEx) { Debug.WriteLine($"[CrashBundleService] Prune delete skipped: {delEx.Message}"); }
                 }
             }
-            catch
-            {
-                // Ignore pruning errors
-            }
+            catch (Exception pruneEx) { Debug.WriteLine($"[CrashBundleService] PruneCrashBundles ignored: {pruneEx.Message}"); }
         }
 
         private static (string FailingModule, string FailingFile, int FailingLine, List<string> StackFrames) ExtractExceptionDetails(Exception ex)
@@ -310,17 +237,14 @@ namespace Housekeeping.Services
 
             try
             {
-                var trace = new StackTrace(ex, fNeedFileInfo: true);
-                var frames = trace.GetFrames();
+                var frames = new StackTrace(ex, fNeedFileInfo: true).GetFrames();
                 if (frames != null)
                 {
                     foreach (var frame in frames)
                     {
                         var method = frame.GetMethod();
                         if (method?.DeclaringType != null && string.IsNullOrWhiteSpace(failingModule))
-                        {
                             failingModule = method.DeclaringType.FullName ?? failingModule;
-                        }
 
                         string? fileName = frame.GetFileName();
                         if (!string.IsNullOrWhiteSpace(fileName))
@@ -328,22 +252,16 @@ namespace Housekeeping.Services
                             failingFile = Path.GetFileName(fileName);
                             failingLine = frame.GetFileLineNumber();
                             if (method?.DeclaringType?.FullName != null)
-                            {
                                 failingModule = method.DeclaringType.FullName;
-                            }
                             break;
                         }
                     }
                 }
             }
-            catch
-            {
-                // Fallback to string parsing below
-            }
+            catch (Exception traceEx) { Debug.WriteLine($"[CrashBundleService] StackTrace reflection fallback: {traceEx.Message}"); }
 
             var stackLines = new List<string>();
-            string rawStack = ex.ToString();
-            foreach (string rawLine in rawStack.Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
+            foreach (string rawLine in ex.ToString().Split(new[] { "\r\n", "\n" }, StringSplitOptions.RemoveEmptyEntries))
             {
                 string trimmed = rawLine.Trim();
                 stackLines.Add(SanitizeText(trimmed));
@@ -355,9 +273,7 @@ namespace Housekeeping.Services
                     {
                         failingFile = Path.GetFileName(match.Groups["file"].Value.Trim());
                         if (int.TryParse(match.Groups["line"].Value, out int parsedLine))
-                        {
                             failingLine = parsedLine;
-                        }
                     }
                 }
             }
@@ -376,9 +292,7 @@ namespace Housekeeping.Services
                     if (buffered.Count > 0)
                     {
                         foreach (string line in buffered)
-                        {
                             result.Add(SanitizeText(line));
-                        }
                         return result;
                     }
                 }
@@ -391,36 +305,24 @@ namespace Housekeeping.Services
                     using var reader = new StreamReader(fs, Encoding.UTF8);
                     string? line;
                     while ((line = reader.ReadLine()) != null)
-                    {
                         allLines.Add(line);
-                    }
 
                     int skip = Math.Max(0, allLines.Count - count);
                     for (int i = skip; i < allLines.Count; i++)
-                    {
                         result.Add(SanitizeText(allLines[i]));
-                    }
                 }
             }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[CrashBundleService] CollectPrecedingLogLines ignored: {ex.Message}");
-            }
-
+            catch (Exception ex) { Debug.WriteLine($"[CrashBundleService] CollectPrecedingLogLines ignored: {ex.Message}"); }
             return result;
         }
 
         private static string SanitizeFileNameSegment(string value)
         {
-            if (string.IsNullOrWhiteSpace(value))
-                return "unknown";
-
+            if (string.IsNullOrWhiteSpace(value)) return "unknown";
             var invalid = Path.GetInvalidFileNameChars();
             var sb = new StringBuilder(value.Length);
             foreach (char c in value)
-            {
                 sb.Append(Array.IndexOf(invalid, c) >= 0 ? '_' : c);
-            }
             return sb.ToString();
         }
     }

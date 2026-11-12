@@ -48,8 +48,8 @@ export const HybridPathPicker: React.FC<HybridPathPickerProps> = ({
       if (!res.cancelled && res.path) {
         onChange(res.path);
       }
-    } catch {
-      // Fallback to server modal if native dialog unavailable
+    } catch (err) {
+      console.debug('[HybridPathPicker] native OS picker unavailable, falling back to modal:', err);
       setModalOpen(true);
     } finally {
       setBusy(false);

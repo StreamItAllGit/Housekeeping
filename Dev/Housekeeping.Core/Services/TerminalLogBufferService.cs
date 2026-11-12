@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using Housekeeping.Models;
 
@@ -66,13 +67,7 @@ namespace Housekeeping.Services
             PruneStaleRunLogs(dir, MaxRunLogRetentionDays);
         }
 
-        public void AttachRunWriter(StreamWriter? writer)
-        {
-            lock (_lock)
-            {
-                _activeRunWriter = writer;
-            }
-        }
+        public void AttachRunWriter(StreamWriter? writer) { lock (_lock) { _activeRunWriter = writer; } }
 
         public void DetachRunWriter()
         {
@@ -86,47 +81,30 @@ namespace Housekeeping.Services
             }
         }
 
+        private static readonly Regex LeadingWallClockPrefixRegex = new(@"^\[\d{2}:\d{2}:\d{2}\]\s+", RegexOptions.Compiled);
+
         public void Append(string tag, string message, AppConfig? configForFooter = null)
         {
             if (message == null) return;
             string cleanTag = string.IsNullOrWhiteSpace(tag) ? "INFO" : tag.Trim().ToUpperInvariant();
+            string normalizedMessage = NormalizeLogMessagePrefix(cleanTag, message);
             var nowLocal = DateTime.Now;
             var nowUtc = nowLocal.ToUniversalTime();
             string tsText = nowLocal.ToString("HH:mm:ss");
-            string formatted = $"[{tsText}] [{cleanTag}] {message}";
+            string formatted = $"[{tsText}] [{cleanTag}] {normalizedMessage}";
             string severity = MapSeverityLevel(cleanTag);
-            string diskLine = $"{nowUtc:yyyy-MM-ddTHH:mm:ss.fffZ} [v{_appVersion}] [PID:{_processId}/T:{Environment.CurrentManagedThreadId}] [{severity}] [{cleanTag}] {message}";
+            string componentTag = string.Equals(severity, cleanTag, StringComparison.OrdinalIgnoreCase) ? "CORE" : cleanTag;
+            string diskLine = $"{nowUtc:yyyy-MM-ddTHH:mm:ss.fffZ} [v{_appVersion}] [PID:{_processId}/T:{Environment.CurrentManagedThreadId}] [{severity}] [{componentTag}] {normalizedMessage}";
 
-            var entry = new TerminalLogEntry
-            {
-                Id = Interlocked.Increment(ref _nextEntryId),
-                TimestampUtc = nowUtc,
-                TimestampText = tsText,
-                Tag = cleanTag,
-                Message = message,
-                FormattedLine = formatted
-            };
-
+            var entry = new TerminalLogEntry { Id = Interlocked.Increment(ref _nextEntryId), TimestampUtc = nowUtc, TimestampText = tsText, Tag = cleanTag, Message = normalizedMessage, FormattedLine = formatted };
             bool scheduleFlush = false;
             lock (_lock)
             {
                 _ringBuffer.AddLast(entry);
-                while (_ringBuffer.Count > _maxCapacity)
-                {
-                    _ringBuffer.RemoveFirst();
-                }
-
-                if (ShouldUpdateFooter(cleanTag, configForFooter))
-                {
-                    LatestFooterLine = message;
-                }
-
-                if (_pendingBatch.Count == 0)
-                {
-                    scheduleFlush = true;
-                }
+                while (_ringBuffer.Count > _maxCapacity) _ringBuffer.RemoveFirst();
+                if (ShouldUpdateFooter(cleanTag, configForFooter)) LatestFooterLine = normalizedMessage;
+                if (_pendingBatch.Count == 0) scheduleFlush = true;
                 _pendingBatch.Add(entry);
-
                 WriteToDiskLocked(diskLine, formatted);
             }
 
@@ -134,6 +112,20 @@ namespace Housekeeping.Services
             {
                 try { _flushTimer.Change(50, Timeout.Infinite); } catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[TerminalLogBufferService] Non-fatal error ignored: {__suppressedEx2.Message}"); }
             }
+        }
+
+        private static string NormalizeLogMessagePrefix(string cleanTag, string rawMessage)
+        {
+            string msg = rawMessage;
+            string tagBracket = $"[{cleanTag}]";
+            while (msg.TrimStart().StartsWith(tagBracket, StringComparison.OrdinalIgnoreCase))
+            {
+                string trimmed = msg.TrimStart();
+                if (trimmed.Length == tagBracket.Length) { msg = ""; break; }
+                if (char.IsWhiteSpace(trimmed[tagBracket.Length])) msg = trimmed.Substring(tagBracket.Length).TrimStart();
+                else break;
+            }
+            return string.Equals(cleanTag, "OUT", StringComparison.Ordinal) ? LeadingWallClockPrefixRegex.Replace(msg, "") : msg;
         }
 
         private void EnsureLiveWriterLocked()

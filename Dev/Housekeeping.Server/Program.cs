@@ -23,6 +23,16 @@ if (cli.ShowHelp)
     return 0;
 }
 
+if (cli.RunStatus)
+{
+    return HousekeepingCliRunner.RunStatusCheck(cli);
+}
+
+if (cli.RunRepairConfig)
+{
+    return HousekeepingCliRunner.RunRepairConfig(cli);
+}
+
 string baseTrimmed = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 string defaultLogsRoot = string.Equals(Path.GetFileName(baseTrimmed), "app", StringComparison.OrdinalIgnoreCase) &&

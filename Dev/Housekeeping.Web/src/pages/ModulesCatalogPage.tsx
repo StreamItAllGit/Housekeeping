@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useAppState } from '../context/AppStateContext';
+import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import { apiClient } from '../services/apiClient';
 import type { DependencyStatusItem, ModuleCatalogItemDto, ModuleId } from '../types/models';
 
@@ -21,8 +22,8 @@ export const ModulesCatalogPage: React.FC = () => {
       const res = await apiClient.getModulesCatalog();
       setModules(res.modules || []);
       setDeps(res.dependencies || []);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug('[ModulesCatalogPage] loadCatalog failed:', err);
     }
   }, []);
 
@@ -100,12 +101,15 @@ export const ModulesCatalogPage: React.FC = () => {
                 </div>
 
                 <label
-                  className="hk-checkbox-label"
+                  className="hk-checkbox-label hk-has-hint"
+                  title={COMMON_UI_HINTS.moduleAppWideActive(m.Name)}
                   onClick={(e) => e.stopPropagation()}
                   style={{ fontSize: 11.5 }}
                 >
                   <input
                     type="checkbox"
+                    className="hk-has-hint"
+                    title={COMMON_UI_HINTS.moduleAppWideActive(m.Name)}
                     checked={m.IsAppWideEnabled}
                     onChange={(e) => void handleToggleModule(m, e.target.checked)}
                   />

@@ -1,5 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import {
+  applyMetaColorScheme,
+  readInitialColorScheme,
+  readInitialDensity,
+  readTabFromHash,
+  useUiLayoutPersistence,
+  type ColorSchemeMode,
+  type NavTabId,
+  type UiDensityMode,
+} from '../hooks/useUiLayoutPersistence';
+import {
   apiClient,
   ApiHttpError,
   setApiTargetNodeId,
@@ -16,20 +26,12 @@ import type {
   PipelineRuntimeStateDto,
   SystemPerformanceStats,
   TerminalLogEntry,
+  TerminalSizePreset,
+  UiLayoutConfig,
 } from '../types/models';
 
-export type NavTabId =
-  | 'dashboard'
-  | 'queues'
-  | 'builder'
-  | 'modules'
-  | 'reports'
-  | 'settings'
-  | 'history';
-
+export type { ColorSchemeMode, NavTabId, UiDensityMode };
 export type SaveIndicatorState = 'saved' | 'saving' | 'error';
-export type ColorSchemeMode = 'system' | 'dark' | 'light';
-export type UiDensityMode = 'compact' | 'comfortable' | 'touch';
 
 interface AppStateContextValue {
   activeTab: NavTabId;
@@ -83,6 +85,14 @@ interface AppStateContextValue {
   density: UiDensityMode;
   setDensity: (d: UiDensityMode) => void;
 
+  uiLayout: UiLayoutConfig;
+  setTerminalHeight: (heightPx: number, preset?: TerminalSizePreset) => void;
+  applyTerminalPreset: (preset: 'small' | 'medium' | 'large') => void;
+  toggleSidebarCollapsed: () => void;
+  setTerminalWordWrap: (wrap: boolean) => void;
+  drivesModalOpen: boolean;
+  setDrivesModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+
   globalDrawerOpen: boolean;
   setGlobalDrawerOpen: React.Dispatch<React.SetStateAction<boolean>>;
   toastMessage: string | null;
@@ -113,71 +123,6 @@ const DEFAULT_PIPELINE_STATE: PipelineRuntimeStateDto = {
 
 const AppStateContext = createContext<AppStateContextValue | null>(null);
 
-function readInitialColorScheme(): ColorSchemeMode {
-  try {
-    const v = localStorage.getItem('color-scheme');
-    if (v === 'dark' || v === 'light') return v;
-  } catch {
-    // ignore
-  }
-  return 'system';
-}
-
-function readInitialDensity(): UiDensityMode {
-  try {
-    const v = localStorage.getItem('hk-density');
-    if (v === 'compact' || v === 'comfortable' || v === 'touch') return v;
-    if (
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(max-width: 767px)').matches
-    ) {
-      return 'touch';
-    }
-  } catch {
-    // ignore
-  }
-  return 'compact';
-}
-
-function applyMetaColorScheme(mode: ColorSchemeMode) {
-  const meta = document.querySelector('meta[name="color-scheme"]');
-  if (meta) {
-    meta.setAttribute('content', mode === 'system' ? 'light dark' : mode);
-  }
-  try {
-    if (mode === 'system') {
-      localStorage.removeItem('color-scheme');
-    } else {
-      localStorage.setItem('color-scheme', mode);
-    }
-  } catch {
-    // ignore
-  }
-}
-
-const VALID_NAV_TABS: readonly NavTabId[] = [
-  'dashboard',
-  'queues',
-  'builder',
-  'modules',
-  'reports',
-  'settings',
-  'history',
-];
-
-function readTabFromHash(): NavTabId {
-  try {
-    const raw = window.location.hash.replace(/^#\/?/, '').trim().toLowerCase() as NavTabId;
-    if ((VALID_NAV_TABS as readonly string[]).includes(raw)) {
-      return raw;
-    }
-  } catch {
-    // ignore
-  }
-  return 'dashboard';
-}
-
 export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeTab, setActiveTabState] = useState<NavTabId>(readTabFromHash);
   const [selectedJobId, setSelectedJobId] = useState<string>('');
@@ -189,15 +134,13 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (window.location.hash !== nextHash) {
         window.history.replaceState(null, '', nextHash);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug('[AppStateContext] history.replaceState skipped:', err);
     }
   }, []);
 
   useEffect(() => {
-    const onHashChange = () => {
-      setActiveTabState(readTabFromHash());
-    };
+    const onHashChange = () => setActiveTabState(readTabFromHash());
     window.addEventListener('hashchange', onHashChange);
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
@@ -262,20 +205,13 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyMetaColorScheme(mode);
   }, []);
 
-  // Two-state header toggle adhering strictly to modern-web-guidance dark-mode-toggle rule
   const toggleTwoStateColorScheme = useCallback(() => {
     const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const currentRenderedDark =
       colorScheme === 'dark' ? true : colorScheme === 'light' ? false : sysDark;
-    const targetDark = !currentRenderedDark;
-    const targetLiteral: 'dark' | 'light' = targetDark ? 'dark' : 'light';
+    const targetLiteral: 'dark' | 'light' = !currentRenderedDark ? 'dark' : 'light';
     const sysLiteral: 'dark' | 'light' = sysDark ? 'dark' : 'light';
-
-    if (targetLiteral === sysLiteral) {
-      setColorScheme('system');
-    } else {
-      setColorScheme(targetLiteral);
-    }
+    setColorScheme(targetLiteral === sysLiteral ? 'system' : targetLiteral);
   }, [colorScheme, setColorScheme]);
 
   const setDensity = useCallback((d: UiDensityMode) => {
@@ -283,12 +219,11 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     document.documentElement.dataset.density = d;
     try {
       localStorage.setItem('hk-density', d);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug('[AppStateContext] density localStorage write skipped:', err);
     }
   }, []);
 
-  // Sync color-scheme across tabs via window 'storage' event
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
       if (e.key === 'color-scheme') {
@@ -308,7 +243,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  // Global Ctrl+` shortcut for toggling the Global Terminal Drawer
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === '`') {
@@ -324,50 +258,51 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     try {
       const st = await apiClient.getGreenroomStatus();
       setGreenroomStatus(st);
-    } catch {
-      // non-fatal
+    } catch (err) {
+      console.debug('[AppStateContext] Greenroom status probe non-fatal:', err);
     }
   }, []);
 
-  const connectRealtime = useCallback(async (nodeId: string) => {
-    await signalrRef.current.connect(nodeId, {
-      onTerminalBatch: (batch) => {
-        appendUniqueTerminalEntries(batch);
-      },
-      onTerminalCleared: () => setTerminalEntries([]),
-      onPipelineState: (st) => setPipelineState(st),
-      onSubprocessProgress: (prog) => {
-        setPipelineState((prev) => ({
-          ...prev,
-          ProgressPercent: prog.Percent,
-          SubprocessStatusText: prog.StatusText || prev.SubprocessStatusText,
-        }));
-      },
-      onTelemetrySnapshot: (snap) => {
-        if (snap.Telemetry) setTelemetry(snap.Telemetry);
-        setOpenComplianceCount(snap.OpenComplianceCount ?? 0);
-        setPipelineState((prev) => ({
-          ...prev,
-          GlobalNextRunStatusText: snap.GlobalNextRunText || prev.GlobalNextRunStatusText,
-          GlobalNextRunUtc: snap.GlobalNextRunUtc,
-          GlobalNextRunQueueName: snap.GlobalNextRunQueueName,
-          PendingSwapCount: snap.PendingSwapCount ?? prev.PendingSwapCount,
-          PendingSwapSampleFile: snap.PendingSwapSampleFile ?? prev.PendingSwapSampleFile,
-          SessionProcessed:
-            typeof snap.SessionProcessed === 'number' ? snap.SessionProcessed : prev.SessionProcessed,
-          SessionSkipped:
-            typeof snap.SessionSkipped === 'number' ? snap.SessionSkipped : prev.SessionSkipped,
-          SessionErrors:
-            typeof snap.SessionErrors === 'number' ? snap.SessionErrors : prev.SessionErrors,
-          FooterStatusText: snap.FooterStatusText || prev.FooterStatusText,
-          InterruptedRun:
-            snap.InterruptedRun !== undefined ? snap.InterruptedRun : prev.InterruptedRun,
-        }));
-      },
-      onComplianceSummary: (s) => setOpenComplianceCount(s.OpenCount ?? 0),
-      onConnectionChanged: (ok) => setRealtimeConnected(ok),
-    });
-  }, []);
+  const connectRealtime = useCallback(
+    async (nodeId: string) => {
+      await signalrRef.current.connect(nodeId, {
+        onTerminalBatch: (batch) => appendUniqueTerminalEntries(batch),
+        onTerminalCleared: () => setTerminalEntries([]),
+        onPipelineState: (st) => setPipelineState(st),
+        onSubprocessProgress: (prog) => {
+          setPipelineState((prev) => ({
+            ...prev,
+            ProgressPercent: prog.Percent,
+            SubprocessStatusText: prog.StatusText || prev.SubprocessStatusText,
+          }));
+        },
+        onTelemetrySnapshot: (snap) => {
+          if (snap.Telemetry) setTelemetry(snap.Telemetry);
+          setOpenComplianceCount(snap.OpenComplianceCount ?? 0);
+          setPipelineState((prev) => ({
+            ...prev,
+            GlobalNextRunStatusText: snap.GlobalNextRunText || prev.GlobalNextRunStatusText,
+            GlobalNextRunUtc: snap.GlobalNextRunUtc,
+            GlobalNextRunQueueName: snap.GlobalNextRunQueueName,
+            PendingSwapCount: snap.PendingSwapCount ?? prev.PendingSwapCount,
+            PendingSwapSampleFile: snap.PendingSwapSampleFile ?? prev.PendingSwapSampleFile,
+            SessionProcessed:
+              typeof snap.SessionProcessed === 'number' ? snap.SessionProcessed : prev.SessionProcessed,
+            SessionSkipped:
+              typeof snap.SessionSkipped === 'number' ? snap.SessionSkipped : prev.SessionSkipped,
+            SessionErrors:
+              typeof snap.SessionErrors === 'number' ? snap.SessionErrors : prev.SessionErrors,
+            FooterStatusText: snap.FooterStatusText || prev.FooterStatusText,
+            InterruptedRun:
+              snap.InterruptedRun !== undefined ? snap.InterruptedRun : prev.InterruptedRun,
+          }));
+        },
+        onComplianceSummary: (s) => setOpenComplianceCount(s.OpenCount ?? 0),
+        onConnectionChanged: (ok) => setRealtimeConnected(ok),
+      });
+    },
+    [appendUniqueTerminalEntries]
+  );
 
   const loadNodeWorkspace = useCallback(
     async (nodeId: string) => {
@@ -444,7 +379,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         return true;
       }
 
-      // Loop until all edits accumulated during an in-flight PUT have been persisted
       while (latestConfigRef.current) {
         const revToSave = editRevisionRef.current;
         const snapshotToSave = latestConfigRef.current;
@@ -459,7 +393,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
             setSaveState('saved');
             return true;
           }
-          // Newer edits arrived while PUT was in flight; loop once more immediately!
         } catch (err) {
           setSaveState('error');
           if (err instanceof ApiHttpError && err.validationErrors.length > 0) {
@@ -508,7 +441,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [enqueueConfigSave, showToast]
   );
 
-  // Global Ctrl+S / Cmd+S force-save shortcut & beforeunload flush guard
   useEffect(() => {
     const onSaveShortcut = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 's' || e.key === 'S')) {
@@ -536,9 +468,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       latestConfigRef.current = nextCfg;
       editRevisionRef.current += 1;
       setSaveState('saving');
-      if (pendingSaveTimerRef.current) {
-        window.clearTimeout(pendingSaveTimerRef.current);
-      }
+      if (pendingSaveTimerRef.current) window.clearTimeout(pendingSaveTimerRef.current);
       pendingSaveTimerRef.current = window.setTimeout(() => {
         pendingSaveTimerRef.current = null;
         void enqueueConfigSave(false);
@@ -553,7 +483,6 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       if (!base) return;
       const next: AppConfig = structuredClone(base);
       mutator(next);
-      // Keep queue job copies synced with DefinedJobs
       const byId = new Map(next.DefinedJobs.map((j) => [j.JobId, j]));
       for (const q of next.NamedQueues) {
         q.Jobs = q.Jobs.map((qj) => byId.get(qj.JobId) ?? qj);
@@ -565,13 +494,21 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     [scheduleDebouncedSave]
   );
 
+  const {
+    uiLayout,
+    setTerminalHeight,
+    applyTerminalPreset,
+    toggleSidebarCollapsed,
+    setTerminalWordWrap,
+    drivesModalOpen,
+    setDrivesModalOpen,
+  } = useUiLayoutPersistence(config, updateConfig);
+
   const updateJob = useCallback(
     (jobId: string, mutator: (job: HousekeepingJob) => void) => {
       updateConfig((draft) => {
         const target = draft.DefinedJobs.find((j) => j.JobId === jobId);
-        if (target) {
-          mutator(target);
-        }
+        if (target) mutator(target);
       });
     },
     [updateConfig]
@@ -585,9 +522,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     latestConfigRef.current = cfg;
     savedRevisionRef.current = editRevisionRef.current;
     setConfig(cfg);
-    if (typeof nextSnapshotsCount === 'number') {
-      setSnapshotsCount(nextSnapshotsCount);
-    }
+    if (typeof nextSnapshotsCount === 'number') setSnapshotsCount(nextSnapshotsCount);
     setSaveErrors([]);
     setSaveState('saved');
   }, []);
@@ -600,25 +535,22 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         setActiveTargetNodeIdState(nodeId);
         try {
           await loadNodeWorkspace(nodeId);
-          showToast(
-            nodeId === 'local'
-              ? 'Switched to Local Machine'
-              : `Switched Target Node to '${nodeId}'`
-          );
+          showToast(nodeId === 'local' ? 'Switched to Local Machine' : `Switched Target Node to '${nodeId}'`);
         } catch (err) {
-          showToast(
-            `Could not connect to target node: ${err instanceof Error ? err.message : 'Offline'}`
-          );
+          showToast(`Could not connect to target node: ${err instanceof Error ? err.message : 'Offline'}`);
         }
       })();
     },
     [flushSaveNow, loadNodeWorkspace, showToast]
   );
 
-  const openJobInBuilder = useCallback((jobId: string) => {
-    setSelectedJobId(jobId);
-    setActiveTab('builder');
-  }, []);
+  const openJobInBuilder = useCallback(
+    (jobId: string) => {
+      setSelectedJobId(jobId);
+      setActiveTab('builder');
+    },
+    [setActiveTab]
+  );
 
   const clearTerminalEntries = useCallback(async () => {
     await apiClient.clearTerminal();
@@ -638,8 +570,7 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           appendUniqueTerminalEntries(res.entries);
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : 'CLI command failed.';
-        showToast(msg);
+        showToast(err instanceof Error ? err.message : 'CLI command failed.');
       } finally {
         setCliRunning(false);
       }
@@ -698,6 +629,13 @@ export const AppStateProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         toggleTwoStateColorScheme,
         density,
         setDensity,
+        uiLayout,
+        setTerminalHeight,
+        applyTerminalPreset,
+        toggleSidebarCollapsed,
+        setTerminalWordWrap,
+        drivesModalOpen,
+        setDrivesModalOpen,
         globalDrawerOpen,
         setGlobalDrawerOpen,
         toastMessage,

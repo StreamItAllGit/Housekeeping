@@ -1,73 +1,23 @@
+// @module: Housekeeping.Web/pages/HistoryPage
+// @purpose: Pipeline execution history table with multi-column sorting, inline log viewer, and CSV/JSON export.
+// @depends-on: react, ../components/ModalDialog, ../context/AppStateContext, ../hints/commonDialogs, ../services/apiClient, ../types/models, ../utils/historyExport
+// @exports: HistoryPage
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ModalDialog } from '../components/ModalDialog';
 import { useAppState } from '../context/AppStateContext';
+import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import { apiClient } from '../services/apiClient';
 import type { RunHistoryEntry } from '../types/models';
+import {
+  exportHistoryToCsv,
+  exportHistoryToJson,
+  formatRunDuration,
+  getRunDurationMs,
+} from '../utils/historyExport';
 
 type SortField = 'Started' | 'Duration' | 'Trigger' | 'Summary' | 'Processed' | 'Errors' | 'Status';
 type SortOrder = 'asc' | 'desc';
 type StatusFilter = 'ALL' | 'SUCCESS' | 'ERROR' | 'CANCELLED';
-
-function formatDuration(startIso: string, endIso: string): string {
-  const ms = Math.max(0, new Date(endIso).getTime() - new Date(startIso).getTime());
-  const totalSec = Math.floor(ms / 1000);
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-}
-
-function getDurationMs(startIso: string, endIso: string): number {
-  return Math.max(0, new Date(endIso).getTime() - new Date(startIso).getTime());
-}
-
-function downloadFile(content: string, filename: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function exportToCsv(items: RunHistoryEntry[]) {
-  const headers = [
-    'StartedAt',
-    'CompletedAt',
-    'Duration',
-    'TriggerSource',
-    'ModulesSummary',
-    'ItemsProcessed',
-    'ItemsSkipped',
-    'ErrorsCount',
-    'Status',
-    'LogFilePath',
-  ];
-  const rows = items.map((e) => [
-    `"${e.StartedAt}"`,
-    `"${e.CompletedAt}"`,
-    `"${formatDuration(e.StartedAt, e.CompletedAt)}"`,
-    `"${e.TriggerSource.replace(/"/g, '""')}"`,
-    `"${e.ModulesSummary.replace(/"/g, '""')}"`,
-    e.ItemsProcessed,
-    e.ItemsSkipped,
-    e.ErrorsCount,
-    `"${e.Status.replace(/"/g, '""')}"`,
-    `"${(e.LogFilePath || '').replace(/"/g, '""')}"`,
-  ]);
-  const csvContent = [headers.join(','), ...rows.map((r) => r.join(','))].join('\r\n');
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  downloadFile(csvContent, `Housekeeping_History_${dateStr}.csv`, 'text/csv');
-}
-
-function exportToJson(items: RunHistoryEntry[]) {
-  const jsonContent = JSON.stringify(items, null, 2);
-  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  downloadFile(jsonContent, `Housekeeping_History_${dateStr}.json`, 'application/json');
-}
 
 export const HistoryPage: React.FC = () => {
   const { showToast } = useAppState();
@@ -84,8 +34,8 @@ export const HistoryPage: React.FC = () => {
     try {
       const list = await apiClient.getHistory();
       setEntries(list || []);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug('[HistoryPage] loadHistory failed:', err);
     }
   }, []);
 
@@ -145,8 +95,8 @@ export const HistoryPage: React.FC = () => {
           break;
         case 'Duration':
           cmp =
-            getDurationMs(a.entry.StartedAt, a.entry.CompletedAt) -
-            getDurationMs(b.entry.StartedAt, b.entry.CompletedAt);
+            getRunDurationMs(a.entry.StartedAt, a.entry.CompletedAt) -
+            getRunDurationMs(b.entry.StartedAt, b.entry.CompletedAt);
           break;
         case 'Trigger':
           cmp = a.entry.TriggerSource.localeCompare(b.entry.TriggerSource);
@@ -228,7 +178,7 @@ export const HistoryPage: React.FC = () => {
     return <span style={{ marginLeft: 4, color: 'var(--amber)' }}>{sortOrder === 'asc' ? '▲' : '▼'}</span>;
   };
 
-  const handleOpenLog = async (idx: number, entry: RunHistoryEntry) => {
+  const handleOpenLog = async (idx: number) => {
     try {
       const res = await apiClient.getHistoryLog(idx);
       setLogModalTitle(`${res.ModulesSummary} — ${new Date(res.StartedAt).toLocaleString()}`);
@@ -355,7 +305,7 @@ export const HistoryPage: React.FC = () => {
           <button
             type="button"
             className="hk-btn sm primary"
-            onClick={() => exportToCsv(getExportEntries())}
+            onClick={() => exportHistoryToCsv(getExportEntries())}
             title={
               selectedKeys.size > 0
                 ? `Export ${selectedKeys.size} selected entries to CSV`
@@ -367,7 +317,7 @@ export const HistoryPage: React.FC = () => {
           <button
             type="button"
             className="hk-btn sm primary"
-            onClick={() => exportToJson(getExportEntries())}
+            onClick={() => exportHistoryToJson(getExportEntries())}
             title={
               selectedKeys.size > 0
                 ? `Export ${selectedKeys.size} selected entries to JSON`
@@ -383,65 +333,78 @@ export const HistoryPage: React.FC = () => {
         <table className="hk-table stack-mobile">
           <thead>
             <tr>
-              <th style={{ width: 40, textAlign: 'center' }}>
+              <th className="hk-has-hint" style={{ width: 40, textAlign: 'center' }} title={COMMON_UI_HINTS.historySelectAll}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={COMMON_UI_HINTS.historySelectAll}
                   checked={isAllSelected}
                   onChange={toggleSelectAll}
                   aria-label="Select all rows"
                 />
               </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Started')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by start date/time"
+                title={COMMON_UI_HINTS.historyCol('Start Timestamp')}
               >
                 Started {renderSortArrow('Started')}
               </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Duration')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by run duration"
+                title={COMMON_UI_HINTS.historyCol('Run Duration')}
               >
                 Duration {renderSortArrow('Duration')}
               </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Trigger')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by trigger source"
+                title={COMMON_UI_HINTS.historyCol('Trigger Source')}
               >
                 Trigger {renderSortArrow('Trigger')}
               </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Summary')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by queue/job summary"
+                title={COMMON_UI_HINTS.historyCol('Queue / Job Summary')}
               >
                 Queue / Job Summary {renderSortArrow('Summary')}
               </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Processed')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by items processed"
+                title={COMMON_UI_HINTS.historyCol('Items Processed')}
               >
                 Processed {renderSortArrow('Processed')}
               </th>
-              <th style={{ width: 80 }}>Skipped</th>
+              <th className="hk-has-hint" style={{ width: 80 }} title={COMMON_UI_HINTS.historyCol('Items Skipped')}>
+                Skipped
+              </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Errors')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by error count"
+                title={COMMON_UI_HINTS.historyCol('Error Count')}
               >
                 Errors {renderSortArrow('Errors')}
               </th>
               <th
+                className="hk-has-hint"
                 onClick={() => handleSort('Status')}
                 style={{ cursor: 'pointer', userSelect: 'none' }}
-                title="Sort by status"
+                title={COMMON_UI_HINTS.historyCol('Terminal Run Status')}
               >
                 Status {renderSortArrow('Status')}
               </th>
-              <th style={{ width: 100 }}>Log</th>
+              <th className="hk-has-hint" style={{ width: 100 }} title={COMMON_UI_HINTS.historyCol('Run Log Viewer')}>
+                Log
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -472,6 +435,8 @@ export const HistoryPage: React.FC = () => {
                   <td data-label="Select" style={{ textAlign: 'center' }}>
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={COMMON_UI_HINTS.historySelectRow}
                       checked={isSelected}
                       onChange={() => toggleRow(itemKey)}
                       aria-label={`Select run ${entry.ModulesSummary}`}
@@ -479,10 +444,10 @@ export const HistoryPage: React.FC = () => {
                   </td>
                   <td data-label="Started">{new Date(entry.StartedAt).toLocaleString()}</td>
                   <td data-label="Duration" className="mono">
-                    {formatDuration(entry.StartedAt, entry.CompletedAt)}
+                    {formatRunDuration(entry.StartedAt, entry.CompletedAt)}
                   </td>
                   <td data-label="Trigger">
-                    <span className="hk-pill">{entry.TriggerSource}</span>
+                    <span className="hk-pill nowrap">{entry.TriggerSource}</span>
                   </td>
                   <td data-label="Summary">
                     <strong>{entry.ModulesSummary}</strong>
@@ -496,14 +461,14 @@ export const HistoryPage: React.FC = () => {
                     {entry.ErrorsCount}
                   </td>
                   <td data-label="Status">
-                    <span className={`hk-pill ${statusClass}`}>{entry.Status}</span>
+                    <span className={`hk-pill nowrap ${statusClass}`}>{entry.Status}</span>
                   </td>
                   <td data-label="Log">
                     <button
                       type="button"
                       className="hk-btn sm"
                       disabled={!entry.LogFilePath}
-                      onClick={() => void handleOpenLog(originalIdx, entry)}
+                      onClick={() => void handleOpenLog(originalIdx)}
                     >
                       📄 View Log
                     </button>

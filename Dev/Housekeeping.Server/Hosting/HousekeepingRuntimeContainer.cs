@@ -36,6 +36,7 @@ namespace Housekeeping.Server.Hosting
         public ComplianceReportService ComplianceReports { get; }
         public SystemPerformanceTelemetryService Telemetry { get; }
         public GreenroomSyncIntegrationService GreenroomSync { get; }
+        public SisterAppCoexistenceService Coexistence { get; }
         public PipelineOrchestratorService Orchestrator { get; }
         public HttpClient FleetHttpClient { get; }
         public INativeDialogBridge NativeDialogs { get; set; }
@@ -72,12 +73,19 @@ namespace Housekeeping.Server.Hosting
             FleetHttpClient = new HttpClient(new SocketsHttpHandler
             {
                 PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-                ConnectTimeout = TimeSpan.FromSeconds(2)
+                PooledConnectionIdleTimeout = TimeSpan.FromSeconds(25),
+                ConnectTimeout = TimeSpan.FromSeconds(5)
             })
             {
                 Timeout = TimeSpan.FromSeconds(10)
             };
+            FleetHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
+                $"Housekeeping/{RemoteNodeDeploymentService.GetLocalAppVersion()} (+{Environment.MachineName}; Suite/mother)");
             GreenroomSync = new GreenroomSyncIntegrationService(ConfigService, customGreenroomHttpClient);
+            Coexistence = new SisterAppCoexistenceService(
+                ConfigService,
+                FleetHttpClient,
+                (tag, msg) => LogBuffer.Append(tag, msg, ConfigService.Config));
             Orchestrator = new PipelineOrchestratorService(
                 ConfigService,
                 LogBuffer,

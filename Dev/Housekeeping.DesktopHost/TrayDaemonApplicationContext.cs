@@ -1,7 +1,6 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -25,11 +24,6 @@ namespace Housekeeping.DesktopHost
         public bool ManagedByMother { get; set; }
     }
 
-    /// <summary>
-    /// Always-on Windows System Tray application context hosting Kestrel + SignalR in-process,
-    /// bridging native Windows file/folder dialogs on the STA thread, and launching either
-    /// the user's default browser or a disposable WebView2 standalone window on demand.
-    /// </summary>
     public sealed class TrayDaemonApplicationContext : ApplicationContext
     {
         private readonly StaNativeDialogBridge _dialogBridge;
@@ -42,8 +36,9 @@ namespace Housekeeping.DesktopHost
         private readonly string? _customDataDirectory;
         private readonly bool _managedByMother;
 
-        private ToolStripMenuItem _pauseResumeMenuItem = null!;
-        private ToolStripMenuItem _stopRunMenuItem = null!;
+        private readonly ToolStripMenuItem _pauseResumeMenuItem;
+        private readonly ToolStripMenuItem _stopCurrentJobMenuItem;
+        private readonly ToolStripMenuItem _stopEntireQueueMenuItem;
         private DisposableWebViewForm? _standaloneWindow;
         private bool _shuttingDown;
 
@@ -86,7 +81,6 @@ namespace Housekeeping.DesktopHost
                 serverOptions,
                 prebuiltRuntime: _runtime);
 
-            // Start Kestrel off the STA SynchronizationContext to avoid any startup deadlock
             Task.Run(() => _webApp.StartAsync()).GetAwaiter().GetResult();
 
             _webApp.Lifetime.ApplicationStopping.Register(() =>
@@ -95,13 +89,9 @@ namespace Housekeeping.DesktopHost
                 try
                 {
                     if (_dialogBridge.IsAvailable && _dialogBridge.InvokeRequired)
-                    {
                         _dialogBridge.BeginInvoke(new Action(ShutdownAndExit));
-                    }
                     else
-                    {
                         ShutdownAndExit();
-                    }
                 }
                 catch (Exception stopEx)
                 {
@@ -112,106 +102,49 @@ namespace Housekeeping.DesktopHost
             bool bindAll = launchOptions.BindLanOverride ?? _runtime.ConfigService.Config.WebServer.BindLanAndTailnet;
             _runtime.Orchestrator.Log("INFO", $"[DesktopHost] Housekeeping Engine Online — listening on {(bindAll ? "0.0.0.0" : "127.0.0.1")}:{_activePort}");
 
-            _customIcon = TryLoadAppIcon();
-            _trayMenu = BuildTrayContextMenu();
+            _customIcon = TrayMenuFactory.TryLoadAppIcon();
+            var menuControls = TrayMenuFactory.Create(
+                _activePort,
+                BaseLocalUrl,
+                _runtime,
+                OpenInBrowser,
+                OpenStandaloneWindow,
+                OpenPreferredDesktopUi,
+                ShowBalloon,
+                RequestEngineShutdown);
+
+            _trayMenu = menuControls.Menu;
+            _pauseResumeMenuItem = menuControls.PauseResumeMenuItem;
+            _stopCurrentJobMenuItem = menuControls.StopCurrentJobMenuItem;
+            _stopEntireQueueMenuItem = menuControls.StopEntireQueueMenuItem;
 
             _notifyIcon = new NotifyIcon
             {
                 Icon = _customIcon ?? SystemIcons.Application,
-                Text = TruncateNotifyText($"Housekeeping — Online (:{_activePort})"),
+                Text = TrayMenuFactory.TruncateNotifyText($"Housekeeping — Online (:{_activePort})"),
                 ContextMenuStrip = _trayMenu,
                 Visible = !_managedByMother
             };
 
             _notifyIcon.DoubleClick += (_, _) => OpenPreferredDesktopUi();
-
             _runtime.Orchestrator.OnTrayNotificationRequested += HandleTrayNotificationRequested;
             _runtime.Orchestrator.OnStateChanged += HandlePipelineStateChanged;
 
             if (!launchOptions.StartMinimized)
-            {
                 OpenPreferredDesktopUi();
-            }
         }
 
         private string BaseLocalUrl => $"http://127.0.0.1:{_activePort}";
 
-        private ContextMenuStrip BuildTrayContextMenu()
-        {
-            var menu = new ContextMenuStrip();
-
-            var headerItem = new ToolStripMenuItem($"Housekeeping (:{_activePort})")
-            {
-                Enabled = false,
-                Font = new Font(SystemFonts.MenuFont ?? SystemFonts.DefaultFont, FontStyle.Bold)
-            };
-            menu.Items.Add(headerItem);
-            menu.Items.Add(new ToolStripSeparator());
-
-            menu.Items.Add("🌐 Open in Browser", null, (_, _) => OpenInBrowser(BaseLocalUrl));
-            menu.Items.Add("🪟 Open Standalone Window", null, (_, _) => OpenStandaloneWindow(BaseLocalUrl));
-            menu.Items.Add("🛡 Open Archive Compliance Reports", null, (_, _) => OpenPreferredDesktopUi($"{BaseLocalUrl}/#reports"));
-
-            menu.Items.Add(new ToolStripSeparator());
-
-            menu.Items.Add("▶ Run Active Queue", null, (_, _) =>
-            {
-                var res = _runtime.Orchestrator.StartOrEnqueueQueueRun(null, isDryRun: false, triggerSource: "SystemTray", enqueueIfBusy: true);
-                if (!res.Accepted || res.Queued)
-                {
-                    ShowBalloon("Housekeeping", res.Message, isWarning: !res.Accepted);
-                }
-            });
-
-            menu.Items.Add("🧪 Dry-Run Active Queue", null, (_, _) =>
-            {
-                var res = _runtime.Orchestrator.StartOrEnqueueQueueRun(null, isDryRun: true, triggerSource: "SystemTrayDryRun", enqueueIfBusy: true);
-                if (!res.Accepted || res.Queued)
-                {
-                    ShowBalloon("Housekeeping", res.Message, isWarning: !res.Accepted);
-                }
-            });
-
-            _pauseResumeMenuItem = new ToolStripMenuItem("⏸ Pause / Resume Queue", null, (_, _) =>
-            {
-                _runtime.Orchestrator.TogglePause();
-            })
-            {
-                Enabled = false
-            };
-            menu.Items.Add(_pauseResumeMenuItem);
-
-            _stopRunMenuItem = new ToolStripMenuItem("⏹ Stop Active Run", null, (_, _) =>
-            {
-                _runtime.Orchestrator.StopActiveRun();
-            })
-            {
-                Enabled = false
-            };
-            menu.Items.Add(_stopRunMenuItem);
-
-            menu.Items.Add(new ToolStripSeparator());
-            menu.Items.Add("⏻ Shut Down Housekeeping Engine", null, (_, _) => RequestEngineShutdown());
-
-            return menu;
-        }
-
-        public void OpenPreferredDesktopUi()
-        {
-            OpenPreferredDesktopUi(BaseLocalUrl);
-        }
+        public void OpenPreferredDesktopUi() => OpenPreferredDesktopUi(BaseLocalUrl);
 
         public void OpenPreferredDesktopUi(string targetUrl)
         {
             string mode = _runtime.ConfigService.Config.WebServer.DefaultDesktopLaunchMode ?? "StandaloneWindow";
             if (string.Equals(mode, "Browser", StringComparison.OrdinalIgnoreCase))
-            {
                 OpenInBrowser(targetUrl);
-            }
             else
-            {
                 OpenStandaloneWindow(targetUrl);
-            }
         }
 
         public void OpenStandaloneWindow(string? targetUrl = null)
@@ -236,11 +169,7 @@ namespace Housekeeping.DesktopHost
                 msg => _runtime.Orchestrator.Log("WARN", $"[DesktopHost] {msg}"),
                 customUserDataRoot: _runtime.ConfigService.DataDirectory);
 
-            _standaloneWindow.FormClosed += (_, _) =>
-            {
-                _standaloneWindow = null;
-            };
-
+            _standaloneWindow.FormClosed += (_, _) => _standaloneWindow = null;
             _standaloneWindow.Show();
             _standaloneWindow.BringToFront();
             _standaloneWindow.Activate();
@@ -248,25 +177,15 @@ namespace Housekeeping.DesktopHost
 
         private static void OpenInBrowser(string url)
         {
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = url,
-                    UseShellExecute = true
-                });
-            }
-            catch (System.Exception __suppressedEx1) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx1.Message}"); }
+            try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
+            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] OpenInBrowser ignored: {ex.Message}"); }
         }
 
         private void HandleTrayNotificationRequested(string title, string message, bool isWarning)
         {
             if (_shuttingDown || !_dialogBridge.IsAvailable || _managedByMother) return;
-            try
-            {
-                _dialogBridge.BeginInvoke(new Action(() => ShowBalloon(title, message, isWarning)));
-            }
-            catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx2.Message}"); }
+            try { _dialogBridge.BeginInvoke(new Action(() => ShowBalloon(title, message, isWarning))); }
+            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Notification ignored: {ex.Message}"); }
         }
 
         private void HandlePipelineStateChanged(PipelineRuntimeStateDto state)
@@ -279,18 +198,19 @@ namespace Housekeeping.DesktopHost
                     if (_shuttingDown) return;
                     _pauseResumeMenuItem.Enabled = state.IsRunning;
                     _pauseResumeMenuItem.Text = state.IsPaused ? "▶ Resume Paused Queue" : "⏸ Pause Active Queue";
-                    _stopRunMenuItem.Enabled = state.IsRunning;
+                    _stopCurrentJobMenuItem.Enabled = state.IsRunning;
+                    _stopEntireQueueMenuItem.Enabled = state.IsRunning || state.PendingRuns.Count > 0;
 
                     if (!_managedByMother)
                     {
                         string tooltip = state.IsRunning
                             ? $"Housekeeping — {(state.IsPaused ? "Paused" : "Running")}: {state.ActiveJobName ?? "Queue"} ({state.ProgressPercent:0}%)"
                             : $"Housekeeping — Online (:{_activePort})";
-                        _notifyIcon.Text = TruncateNotifyText(tooltip);
+                        _notifyIcon.Text = TrayMenuFactory.TruncateNotifyText(tooltip);
                     }
                 }));
             }
-            catch (System.Exception __suppressedEx3) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx3.Message}"); }
+            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] State update ignored: {ex.Message}"); }
         }
 
         private void ShowBalloon(string title, string message, bool isWarning)
@@ -304,27 +224,22 @@ namespace Housekeeping.DesktopHost
                     string.IsNullOrWhiteSpace(message) ? "Notification" : message,
                     isWarning ? ToolTipIcon.Warning : ToolTipIcon.Info);
             }
-            catch (System.Exception __suppressedEx4) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx4.Message}"); }
+            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] ShowBalloon ignored: {ex.Message}"); }
         }
 
         private void RequestEngineShutdown()
         {
             if (_shuttingDown) return;
-
             if (_runtime.Orchestrator.IsRunning)
             {
                 DialogResult confirm = MessageBox.Show(
-                    "A Housekeeping job or queue is currently running.\n\nStop the active run and shut down the Housekeeping background engine?",
+                    "A Housekeeping job or queue is currently running.\n\nGracefully abort the active run (preserving the interrupted checkpoint and Up Next queue for recovery) and shut down the Housekeeping engine?",
                     "Confirm Housekeeping Engine Shutdown",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Warning);
 
-                if (confirm != DialogResult.Yes)
-                {
-                    return;
-                }
+                if (confirm != DialogResult.Yes) return;
             }
-
             ShutdownAndExit();
         }
 
@@ -335,40 +250,32 @@ namespace Housekeeping.DesktopHost
 
             _runtime.Orchestrator.OnTrayNotificationRequested -= HandleTrayNotificationRequested;
             _runtime.Orchestrator.OnStateChanged -= HandlePipelineStateChanged;
-
-            if (_runtime.Orchestrator.IsRunning)
-            {
-                _runtime.Orchestrator.StopActiveRun();
-            }
+            _runtime.Orchestrator.InitiateGracefulShutdownAbort("System Tray Shutdown");
 
             if (_standaloneWindow != null && !_standaloneWindow.IsDisposed)
             {
-                try { _standaloneWindow.Close(); } catch (System.Exception __suppressedEx5) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx5.Message}"); }
+                try { _standaloneWindow.Close(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Window close ignored: {ex.Message}"); }
                 _standaloneWindow = null;
             }
 
-            try
-            {
-                _notifyIcon.Visible = false;
-                _notifyIcon.Dispose();
-            }
-            catch (System.Exception __suppressedEx6) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx6.Message}"); }
+            try { _notifyIcon.Visible = false; _notifyIcon.Dispose(); }
+            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] NotifyIcon dispose ignored: {ex.Message}"); }
 
             try
             {
                 Task.Run(async () =>
                 {
                     using var stopCts = new CancellationTokenSource(TimeSpan.FromSeconds(4));
-                    try { await _webApp.StopAsync(stopCts.Token); } catch (System.Exception __suppressedEx7) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx7.Message}"); }
-                    try { await _webApp.DisposeAsync(); } catch (System.Exception __suppressedEx8) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx8.Message}"); }
+                    try { await _webApp.StopAsync(stopCts.Token); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] StopAsync ignored: {ex.Message}"); }
+                    try { await _webApp.DisposeAsync(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] DisposeAsync ignored: {ex.Message}"); }
                 }).GetAwaiter().GetResult();
             }
-            catch (System.Exception __suppressedEx9) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx9.Message}"); }
+            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Shutdown task ignored: {ex.Message}"); }
 
-            try { _runtime.Dispose(); } catch (System.Exception __suppressedEx10) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx10.Message}"); }
-            try { _trayMenu.Dispose(); } catch (System.Exception __suppressedEx11) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx11.Message}"); }
-            try { _customIcon?.Dispose(); } catch (System.Exception __suppressedEx12) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx12.Message}"); }
-            try { _dialogBridge.Close(); _dialogBridge.Dispose(); } catch (System.Exception __suppressedEx13) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx13.Message}"); }
+            try { _runtime.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Runtime dispose ignored: {ex.Message}"); }
+            try { _trayMenu.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Menu dispose ignored: {ex.Message}"); }
+            try { _customIcon?.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Icon dispose ignored: {ex.Message}"); }
+            try { _dialogBridge.Close(); _dialogBridge.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] DialogBridge dispose ignored: {ex.Message}"); }
 
             ExitThread();
         }
@@ -376,38 +283,8 @@ namespace Housekeeping.DesktopHost
         protected override void Dispose(bool disposing)
         {
             if (disposing && !_shuttingDown)
-            {
                 ShutdownAndExit();
-            }
             base.Dispose(disposing);
-        }
-
-        private static Icon? TryLoadAppIcon()
-        {
-            try
-            {
-                string icoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "app_icon.ico");
-                if (File.Exists(icoPath))
-                {
-                    return new Icon(icoPath);
-                }
-
-                string exePath = Environment.ProcessPath ?? "";
-                if (!string.IsNullOrWhiteSpace(exePath) && File.Exists(exePath))
-                {
-                    return Icon.ExtractAssociatedIcon(exePath);
-                }
-            }
-            catch (System.Exception __suppressedEx14) { System.Diagnostics.Debug.WriteLine($"[TrayDaemonApplicationContext] Non-fatal error ignored: {__suppressedEx14.Message}"); }
-
-            return null;
-        }
-
-        private static string TruncateNotifyText(string text)
-        {
-            if (string.IsNullOrEmpty(text)) return "Housekeeping";
-            // Win32 NotifyIcon.Text strictly caps at 63 characters (< 64)
-            return text.Length <= 63 ? text : text.Substring(0, 60) + "...";
         }
     }
 }

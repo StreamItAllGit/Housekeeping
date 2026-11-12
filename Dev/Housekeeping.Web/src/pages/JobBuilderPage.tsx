@@ -1,7 +1,13 @@
+// @module: Housekeeping.Web/pages/JobBuilderPage
+// @purpose: Master-detail job definition workspace with single-line compact module icon badges and module editors.
+// @depends-on: react, ../context/AppStateContext, ../hints/jobBuilder, ../services/apiClient, ../types/models, ../utils/jobSummary, ./editors/*
+// @exports: JobBuilderPage
 import React, { useMemo, useState } from 'react';
 import { useAppState } from '../context/AppStateContext';
+import { JOB_BUILDER_HINTS } from '../hints/jobBuilder';
 import { apiClient } from '../services/apiClient';
-import { MODULE_METADATA, type HousekeepingJob, type ModuleId } from '../types/models';
+import { MODULE_METADATA, type ModuleId } from '../types/models';
+import { summarizeJob } from '../utils/jobSummary';
 import { ArchiveCompressorEditor } from './editors/ArchiveCompressorEditor';
 import { CloudSyncEditor } from './editors/CloudSyncEditor';
 import { CollectionManifestEditor } from './editors/CollectionManifestEditor';
@@ -10,29 +16,6 @@ import { HumbleSyncEditor } from './editors/HumbleSyncEditor';
 import { MediaTranscoderEditor } from './editors/MediaTranscoderEditor';
 import { ProxyGeneratorEditor } from './editors/ProxyGeneratorEditor';
 import { RomLauncherGeneratorEditor } from './editors/RomLauncherGeneratorEditor';
-
-function summarizeJob(job: HousekeepingJob): string {
-  switch (job.ModuleType) {
-    case 'ProxyGenerator':
-      return `${job.ProxyGenerator?.Folders?.filter((f) => f.Enabled).length ?? 0} folder(s) • ${job.ProxyGenerator?.HandBrakeProfileId || 'Proxy_360p'}`;
-    case 'ArchiveCompressor':
-      return `${job.ArchiveCompressor?.Mappings?.filter((m) => m.Enabled).length ?? 0} pair(s) • ${job.ArchiveCompressor?.HandBrakeProfileId || 'Archive_LQ'}`;
-    case 'MediaTranscoder':
-      return `${(job.MediaTranscoder?.DrivesToScan?.length ?? 0) + (job.MediaTranscoder?.CustomFoldersToScan?.filter((f) => f.Enabled).length ?? 0)} root(s) • ${job.MediaTranscoder?.MasterFileTag || '(Original)'}`;
-    case 'RomLauncherGenerator':
-      return `${job.RomLauncherGenerator?.Collections?.filter((c) => c.Enabled).length ?? 0} console(s) • Compliance: ${job.RomLauncherGenerator?.EnableArchiveTemplateComplianceScan ? 'On' : 'Off'}`;
-    case 'CloudSync':
-      return `${job.CloudSync?.Jobs?.filter((j) => j.Enabled).length ?? 0} rclone sync pair(s)`;
-    case 'HumbleSync':
-      return job.HumbleSync?.LibraryPath || 'Library path unset';
-    case 'CustomScripts':
-      return `${job.CustomScripts?.Tasks?.filter((t) => t.Enabled).length ?? 0} script task(s)`;
-    case 'CollectionManifest':
-      return `${job.CollectionManifest?.TargetFolders?.filter((f) => f.Enabled).length ?? 0} folder(s) • Rules: ${job.CollectionManifest?.FieldParseRules?.filter((r) => r.Enabled).length ?? 0}`;
-    default:
-      return '';
-  }
-}
 
 export const JobBuilderPage: React.FC = () => {
   const {
@@ -96,14 +79,19 @@ export const JobBuilderPage: React.FC = () => {
     );
   const blockActiveJobTrigger = isActiveJobRunningSingle || isActiveJobQueued;
 
+  const refreshBootstrap = async (selectId?: string) => {
+    const boot = await apiClient.getConfigBootstrap();
+    replaceConfigFromServer(boot.config, boot.snapshotsCount);
+    if (selectId !== undefined) setSelectedJobId(selectId);
+    return boot;
+  };
+
   const handleCreateJob = async (mod: ModuleId) => {
     setNewModuleChoice('');
     await flushSaveNow();
     try {
       const res = await apiClient.createJob(mod, undefined, config.ActiveQueueId);
-      const boot = await apiClient.getConfigBootstrap();
-      replaceConfigFromServer(boot.config, boot.snapshotsCount);
-      setSelectedJobId(res.job.JobId);
+      await refreshBootstrap(res.job.JobId);
       showToast(`Created job '${res.job.Name}'.`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed creating job.');
@@ -115,9 +103,7 @@ export const JobBuilderPage: React.FC = () => {
     await flushSaveNow();
     try {
       const res = await apiClient.cloneJob(activeJob.JobId);
-      const boot = await apiClient.getConfigBootstrap();
-      replaceConfigFromServer(boot.config, boot.snapshotsCount);
-      setSelectedJobId(res.job.JobId);
+      await refreshBootstrap(res.job.JobId);
       showToast(`Cloned '${activeJob.Name}' -> '${res.job.Name}'.`);
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Clone failed.');
@@ -129,8 +115,7 @@ export const JobBuilderPage: React.FC = () => {
     await flushSaveNow();
     try {
       await apiClient.deleteJob(activeJob.JobId);
-      const boot = await apiClient.getConfigBootstrap();
-      replaceConfigFromServer(boot.config, boot.snapshotsCount);
+      const boot = await refreshBootstrap();
       setSelectedJobId(boot.config.DefinedJobs[0]?.JobId || '');
       showToast(`Deleted job '${activeJob.Name}'.`);
     } catch (err) {
@@ -142,8 +127,7 @@ export const JobBuilderPage: React.FC = () => {
     await flushSaveNow();
     try {
       const res = await apiClient.populateStarterJobs();
-      const boot = await apiClient.getConfigBootstrap();
-      replaceConfigFromServer(boot.config, boot.snapshotsCount);
+      await refreshBootstrap();
       showToast(
         res.addedCount > 0
           ? `Added ${res.addedCount} starter module job(s).`
@@ -184,11 +168,8 @@ export const JobBuilderPage: React.FC = () => {
 
   return (
     <div className="hk-builder-layout">
-      {/* Mobile Quick Job Switcher Bar (<= 768px only; Desktop keeps full sidebar permanently open) */}
       <div className="hk-mobile-only hk-mobile-switcher-bar">
-        <span style={{ fontSize: 13 }} aria-hidden="true">
-          🛠
-        </span>
+        <span style={{ fontSize: 13 }} aria-hidden="true">🛠</span>
         <select
           className="hk-select"
           value={activeJob?.JobId || ''}
@@ -212,10 +193,7 @@ export const JobBuilderPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Left Sidebar: Defined Jobs Repository */}
-      <aside
-        className={`hk-card hk-mobile-collapsible-sidebar ${mobileListOpen ? '' : 'collapsed'}`}
-      >
+      <aside className={`hk-card hk-mobile-collapsible-sidebar ${mobileListOpen ? '' : 'collapsed'}`}>
         <div className="hk-row" style={{ justifyContent: 'space-between', marginBottom: 8 }}>
           <strong>
             Defined Jobs <span className="hk-pill">{config.DefinedJobs.length}</span>
@@ -242,11 +220,7 @@ export const JobBuilderPage: React.FC = () => {
           <select
             className="hk-select"
             value={filterModule}
-            onChange={(e) =>
-              updateConfig((d) => {
-                d.JobBuilderFilterModule = e.target.value;
-              })
-            }
+            onChange={(e) => updateConfig((d) => (d.JobBuilderFilterModule = e.target.value))}
             aria-label="Filter jobs by module"
           >
             <option value="All">All Modules</option>
@@ -260,11 +234,7 @@ export const JobBuilderPage: React.FC = () => {
           <select
             className="hk-select"
             value={sortMode}
-            onChange={(e) =>
-              updateConfig((d) => {
-                d.JobBuilderSortMode = e.target.value;
-              })
-            }
+            onChange={(e) => updateConfig((d) => (d.JobBuilderSortMode = e.target.value))}
             aria-label="Sort jobs"
           >
             <option value="NameAsc">Name (A → Z)</option>
@@ -279,11 +249,7 @@ export const JobBuilderPage: React.FC = () => {
               type="radio"
               name="hk-builder-view"
               checked={viewMode === 'Compact'}
-              onChange={() =>
-                updateConfig((d) => {
-                  d.JobBuilderViewMode = 'Compact';
-                })
-              }
+              onChange={() => updateConfig((d) => (d.JobBuilderViewMode = 'Compact'))}
             />
             Compact
           </label>
@@ -292,63 +258,71 @@ export const JobBuilderPage: React.FC = () => {
               type="radio"
               name="hk-builder-view"
               checked={viewMode === 'Detailed'}
-              onChange={() =>
-                updateConfig((d) => {
-                  d.JobBuilderViewMode = 'Detailed';
-                })
-              }
+              onChange={() => updateConfig((d) => (d.JobBuilderViewMode = 'Detailed'))}
             />
             Detailed
           </label>
         </div>
 
         <div className="hk-job-list">
-          {visibleJobs.map((j) => (
-            <div
-              key={j.JobId}
-              className={`hk-job-item ${activeJob?.JobId === j.JobId ? 'active' : ''}`}
-              onClick={() => {
-                setSelectedJobId(j.JobId);
-                setMobileListOpen(false);
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={j.Enabled}
-                onClick={(e) => e.stopPropagation()}
-                onChange={(e) =>
-                  updateJob(j.JobId, (draft) => {
-                    draft.Enabled = e.target.checked;
-                  })
-                }
-                aria-label={`Enable ${j.Name}`}
-              />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  className="hk-row"
-                  style={{ justifyContent: 'space-between', gap: 6, flexWrap: 'nowrap' }}
-                >
-                  <strong
-                    style={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
+          {visibleJobs.map((j) => {
+            const meta = MODULE_METADATA[j.ModuleType];
+            const enableHint = JOB_BUILDER_HINTS.sidebarJobEnabled(j.Name);
+            return (
+              <div
+                key={j.JobId}
+                className={`hk-job-item ${activeJob?.JobId === j.JobId ? 'active' : ''}`}
+                onClick={() => {
+                  setSelectedJobId(j.JobId);
+                  setMobileListOpen(false);
+                }}
+              >
+                <input
+                  type="checkbox"
+                  className="hk-has-hint"
+                  title={enableHint}
+                  checked={j.Enabled}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => updateJob(j.JobId, (draft) => (draft.Enabled = e.target.checked))}
+                  aria-label={`Enable ${j.Name}`}
+                />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div
+                    className="hk-row"
+                    style={{ justifyContent: 'space-between', gap: 6, flexWrap: 'nowrap' }}
                   >
-                    {j.Name}
-                  </strong>
-                  <span className="hk-pill accent" style={{ fontSize: 10.5, padding: '1px 6px' }}>
-                    {MODULE_METADATA[j.ModuleType]?.badge || j.ModuleType}
-                  </span>
-                </div>
-                {viewMode === 'Detailed' && (
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>
-                    {summarizeJob(j)}
+                    <strong
+                      style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      title={j.Name}
+                    >
+                      {j.Name}
+                    </strong>
+                    {viewMode === 'Compact' ? (
+                      <span
+                        className="hk-pill accent icon-only nowrap"
+                        title={`${meta?.label || j.ModuleType}`}
+                      >
+                        {meta?.icon || '⚙'}
+                      </span>
+                    ) : (
+                      <span
+                        className="hk-pill accent nowrap"
+                        style={{ fontSize: 10.5, padding: '1px 6px' }}
+                        title={meta?.label || j.ModuleType}
+                      >
+                        {meta?.badge || j.ModuleType}
+                      </span>
+                    )}
                   </div>
-                )}
+                  {viewMode === 'Detailed' && (
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 3 }}>
+                      {summarizeJob(j)}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -387,7 +361,6 @@ export const JobBuilderPage: React.FC = () => {
         </div>
       </aside>
 
-      {/* Right Pane: Active Job Header + Dedicated Module Editor */}
       <div>
         {activeJob ? (
           <>
@@ -401,45 +374,38 @@ export const JobBuilderPage: React.FC = () => {
                       className="hk-input hk-mobile-flex-input"
                       style={{ width: 220, fontWeight: 700 }}
                       value={activeJob.Name}
-                      onChange={(e) =>
-                        updateJob(activeJob.JobId, (d) => {
-                          d.Name = e.target.value;
-                        })
-                      }
+                      onChange={(e) => updateJob(activeJob.JobId, (d) => (d.Name = e.target.value))}
                     />
                   </div>
 
-                  <span className="hk-pill accent">
+                  <span className="hk-pill accent nowrap">
                     {MODULE_METADATA[activeJob.ModuleType]?.badge || activeJob.ModuleType}
                   </span>
 
-                  <label className="hk-checkbox-label">
+                  <label className="hk-checkbox-label hk-has-hint" title={JOB_BUILDER_HINTS.enabledInQueue}>
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={JOB_BUILDER_HINTS.enabledInQueue}
                       checked={activeJob.Enabled}
-                      onChange={(e) =>
-                        updateJob(activeJob.JobId, (d) => {
-                          d.Enabled = e.target.checked;
-                        })
-                      }
+                      onChange={(e) => updateJob(activeJob.JobId, (d) => (d.Enabled = e.target.checked))}
                     />
                     Enabled In Queue
                   </label>
 
-                  <label className="hk-checkbox-label">
+                  <label className="hk-checkbox-label hk-has-hint" title={JOB_BUILDER_HINTS.runInExternalCmd}>
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={JOB_BUILDER_HINTS.runInExternalCmd}
                       checked={activeJob.RunInExternalCmd}
                       onChange={(e) =>
-                        updateJob(activeJob.JobId, (d) => {
-                          d.RunInExternalCmd = e.target.checked;
-                        })
+                        updateJob(activeJob.JobId, (d) => (d.RunInExternalCmd = e.target.checked))
                       }
                     />
                     Run in Separate CMD Window
                   </label>
 
-                  {/* Decision 9: General Post-Job Chaining Selector */}
                   <div className="hk-row" style={{ gap: 6 }}>
                     <span className="hk-field-label">On Success → Trigger:</span>
                     <select
@@ -447,9 +413,7 @@ export const JobBuilderPage: React.FC = () => {
                       style={{ width: 'auto' }}
                       value={activeJob.OnSuccessTriggerJobId || ''}
                       onChange={(e) =>
-                        updateJob(activeJob.JobId, (d) => {
-                          d.OnSuccessTriggerJobId = e.target.value;
-                        })
+                        updateJob(activeJob.JobId, (d) => (d.OnSuccessTriggerJobId = e.target.value))
                       }
                       aria-label="Post-job chain trigger on success"
                     >
@@ -500,15 +464,12 @@ export const JobBuilderPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Module-Specific Editor */}
             {activeJob.ModuleType === 'ProxyGenerator' && (
               <ProxyGeneratorEditor
                 cfg={activeJob.ProxyGenerator || config.ProxyGenerator}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.ProxyGenerator) {
-                      j.ProxyGenerator = structuredClone(config.ProxyGenerator);
-                    }
+                    if (!j.ProxyGenerator) j.ProxyGenerator = structuredClone(config.ProxyGenerator);
                     mut(j.ProxyGenerator);
                   })
                 }
@@ -520,9 +481,8 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.ArchiveCompressor || config.ArchiveCompressor}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.ArchiveCompressor) {
+                    if (!j.ArchiveCompressor)
                       j.ArchiveCompressor = structuredClone(config.ArchiveCompressor);
-                    }
                     mut(j.ArchiveCompressor);
                   })
                 }
@@ -534,9 +494,7 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.MediaTranscoder || config.MediaTranscoder}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.MediaTranscoder) {
-                      j.MediaTranscoder = structuredClone(config.MediaTranscoder);
-                    }
+                    if (!j.MediaTranscoder) j.MediaTranscoder = structuredClone(config.MediaTranscoder);
                     mut(j.MediaTranscoder);
                   })
                 }
@@ -549,9 +507,8 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.RomLauncherGenerator || config.RomLauncherGenerator}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.RomLauncherGenerator) {
+                    if (!j.RomLauncherGenerator)
                       j.RomLauncherGenerator = structuredClone(config.RomLauncherGenerator);
-                    }
                     mut(j.RomLauncherGenerator);
                   })
                 }
@@ -564,9 +521,7 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.CloudSync || config.CloudSync}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.CloudSync) {
-                      j.CloudSync = structuredClone(config.CloudSync);
-                    }
+                    if (!j.CloudSync) j.CloudSync = structuredClone(config.CloudSync);
                     mut(j.CloudSync);
                   })
                 }
@@ -578,9 +533,7 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.HumbleSync || config.HumbleSync}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.HumbleSync) {
-                      j.HumbleSync = structuredClone(config.HumbleSync);
-                    }
+                    if (!j.HumbleSync) j.HumbleSync = structuredClone(config.HumbleSync);
                     mut(j.HumbleSync);
                   })
                 }
@@ -592,9 +545,7 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.CustomScripts || config.CustomScripts}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.CustomScripts) {
-                      j.CustomScripts = structuredClone(config.CustomScripts);
-                    }
+                    if (!j.CustomScripts) j.CustomScripts = structuredClone(config.CustomScripts);
                     mut(j.CustomScripts);
                   })
                 }
@@ -607,9 +558,8 @@ export const JobBuilderPage: React.FC = () => {
                 cfg={activeJob.CollectionManifest || config.CollectionManifest}
                 onChange={(mut) =>
                   updateJob(activeJob.JobId, (j) => {
-                    if (!j.CollectionManifest) {
+                    if (!j.CollectionManifest)
                       j.CollectionManifest = structuredClone(config.CollectionManifest);
-                    }
                     mut(j.CollectionManifest);
                   })
                 }

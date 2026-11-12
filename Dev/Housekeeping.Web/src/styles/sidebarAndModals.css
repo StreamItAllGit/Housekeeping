@@ -1,0 +1,279 @@
+/* @module: Housekeeping.Web/styles/sidebarAndModals */
+/* @purpose: Sidebar drive footer, docked mobile bottom nav, Omni-Search, Keyboard Shortcuts, and System Doctor KPI styles. */
+/* @depends-on: ./theme.css */
+/* @exports: .hk-sidebar-utils, .hk-sidebar-drives, .hk-mobile-bottom-nav, .hk-omni-search, .hk-shortcuts-dialog, .hk-doctor-panel */
+
+.hk-text-muted {
+  color: var(--text-muted);
+}
+
+.hk-doctor-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.hk-kpi-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hk-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.hk-kpi-sub {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.hk-sidebar-utils {
+  flex: 0 0 auto;
+  padding: 6px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hk-sidebar-util-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.hk-sidebar-rail.collapsed .hk-sidebar-util-btn {
+  justify-content: center;
+  padding: 6px 0;
+}
+
+.hk-sidebar-util-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.hk-sidebar-util-btn .hk-kbd {
+  margin-left: auto;
+}
+
+.hk-sidebar-drives {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 8px;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-elevated);
+  font-size: 11px;
+}
+
+.hk-sidebar-drives-title {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  flex-shrink: 0;
+}
+
+.hk-sidebar-drives-title:hover {
+  color: var(--accent);
+}
+
+.hk-sidebar-drives-list {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.hk-sidebar-drive-item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: 11.5px;
+}
+
+.hk-sidebar-drive-item:hover {
+  background: var(--bg-hover);
+}
+
+.hk-sidebar-drive-item .hk-drive-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.hk-sidebar-drive-item.ok .hk-drive-dot { background: #10b981; }
+.hk-sidebar-drive-item.warn .hk-drive-dot { background: #f59e0b; }
+.hk-sidebar-drive-item.err .hk-drive-dot { background: #ef4444; }
+.hk-sidebar-drive-item .hk-drive-name { font-weight: 600; }
+
+.hk-sidebar-drive-item .hk-drive-space {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-muted);
+}
+
+.hk-sidebar-footer {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding: 6px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hk-sidebar-toggle-btn {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  width: 100%;
+  text-align: center;
+}
+
+.hk-sidebar-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.hk-omni-search { display: flex; flex-direction: column; gap: 10px; }
+.hk-omni-results { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; padding-right: 4px; }
+.hk-omni-item { padding: 8px 10px; border-radius: var(--radius-sm); cursor: pointer; display: flex; flex-direction: column; gap: 2px; border: 1px solid transparent; }
+.hk-omni-item.selected, .hk-omni-item:hover { background: var(--bg-hover); border-color: var(--border-subtle); }
+.hk-omni-item-header { display: flex; align-items: center; gap: 8px; }
+.hk-omni-item-sub { font-size: 11.5px; color: var(--text-muted); padding-left: 2px; }
+.hk-omni-empty { padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px; }
+.hk-omni-footer { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px; }
+
+.hk-shortcuts-dialog { display: flex; flex-direction: column; gap: 14px; }
+.hk-shortcuts-group { display: flex; flex-direction: column; gap: 6px; }
+.hk-shortcuts-title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #f59e0b; margin: 0; }
+.hk-shortcuts-list { display: flex; flex-direction: column; gap: 3px; }
+.hk-shortcut-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px; border-bottom: 1px solid var(--border-subtle); }
+.hk-shortcut-desc { font-size: 12.5px; color: var(--text-secondary); }
+.hk-shortcut-keys { display: flex; gap: 4px; }
+
+.hk-kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  color: var(--text-primary);
+  display: inline-block;
+  line-height: 1.2;
+}
+
+@media (max-width: 820px), (max-width: 920px) and (max-height: 500px) {
+  .hk-sidebar-rail { display: none; }
+
+  .hk-mobile-bottom-nav {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    order: 2;
+    flex-shrink: 0;
+    min-height: 52px;
+    padding: 2px max(4px, env(safe-area-inset-left, 4px)) max(2px, env(safe-area-inset-bottom, 2px)) max(4px, env(safe-area-inset-right, 4px));
+    background: var(--bg-chrome);
+    border-top: 1px solid var(--border-strong);
+    z-index: 25;
+  }
+
+  .hk-mobile-nav-btn {
+    appearance: none;
+    background: transparent;
+    border: none;
+    border-top: 2px solid transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    padding: 4px 1px;
+    min-height: 48px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    min-width: 0;
+    touch-action: manipulation;
+  }
+
+  .hk-mobile-nav-btn.active {
+    color: #f59e0b;
+    border-top-color: #f59e0b;
+    background: rgba(245, 158, 11, 0.1);
+    font-weight: 700;
+  }
+
+  .hk-mobile-nav-icon {
+    position: relative;
+    font-size: 15px;
+    line-height: 1.1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .hk-mobile-nav-icon .hk-badge-count {
+    position: absolute;
+    top: -5px;
+    right: -12px;
+    min-width: 15px;
+    height: 14px;
+    padding: 0 3px;
+    font-size: 9px;
+  }
+
+  .hk-mobile-nav-label {
+    font-size: 9.5px;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+}

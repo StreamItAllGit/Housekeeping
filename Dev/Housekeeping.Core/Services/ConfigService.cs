@@ -20,7 +20,7 @@ namespace Housekeeping.Services
         public int QueueCount { get; set; }
     }
 
-    public class ConfigService
+    public partial class ConfigService
     {
         public const int MaxConfigSnapshots = 20;
 
@@ -64,7 +64,8 @@ namespace Housekeeping.Services
         {
             WriteIndented = true,
             PropertyNameCaseInsensitive = true,
-            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter(namingPolicy: null, allowIntegerValues: true) }
         };
 
         private readonly object _ioLock = new();
@@ -215,193 +216,6 @@ namespace Housekeeping.Services
             LoadHistory();
         }
 
-        public static bool MigrateLegacyRootStateIfPresent(string installRoot, string dataDirectory, out string? migrationMessage)
-        {
-            migrationMessage = null;
-            bool migratedAny = false;
-            try
-            {
-                string normRoot = Path.GetFullPath(installRoot)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                string normData = Path.GetFullPath(dataDirectory)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                if (string.Equals(normRoot, normData, StringComparison.OrdinalIgnoreCase))
-                {
-                    return false;
-                }
-
-                Directory.CreateDirectory(normData);
-
-                string rootSettings = Path.Combine(normRoot, "settings.json");
-                string appSettings = Path.Combine(normRoot, "app", "settings.json");
-                string dataSettings = Path.Combine(normData, "settings.json");
-
-                long rootLen = File.Exists(rootSettings) ? new FileInfo(rootSettings).Length : 0;
-                long appLen = File.Exists(appSettings) ? new FileInfo(appSettings).Length : 0;
-                long dataLen = File.Exists(dataSettings) ? new FileInfo(dataSettings).Length : 0;
-
-                if (rootLen > 0)
-                {
-                    if (dataLen == 0 || (rootLen > 30_000 && dataLen < rootLen) || rootLen > dataLen)
-                    {
-                        File.Copy(rootSettings, dataSettings, overwrite: true);
-                        dataLen = rootLen;
-                        migrationMessage = $"[ConfigService] Migrated canonical root settings.json ({rootLen} bytes) to data\\settings.json.";
-                        migratedAny = true;
-                    }
-                    try { File.Delete(rootSettings); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ConfigService] Delete root settings.json ignored: {ex.Message}"); }
-                }
-
-                if (appLen > 0)
-                {
-                    if (dataLen == 0 || (appLen > 30_000 && dataLen < appLen))
-                    {
-                        File.Copy(appSettings, dataSettings, overwrite: true);
-                        dataLen = appLen;
-                        migrationMessage ??= $"[ConfigService] Migrated app\\settings.json ({appLen} bytes) to data\\settings.json.";
-                        migratedAny = true;
-                    }
-                    try { File.Delete(appSettings); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ConfigService] Delete app settings.json ignored: {ex.Message}"); }
-                }
-
-                string[] companionFiles =
-                {
-                    "settings.json.bak",
-                    "settings.json.tmp",
-                    "history.json",
-                    "compliance_reports.json",
-                    "pending_swaps.json",
-                    "interrupted_run_checkpoint.json",
-                    ".hk_cookie_secret.key"
-                };
-
-                foreach (string fileName in companionFiles)
-                {
-                    if (MigrateSingleRootStateFile(Path.Combine(normRoot, fileName), Path.Combine(normData, fileName)))
-                    {
-                        migratedAny = true;
-                    }
-                    string appCompanion = Path.Combine(normRoot, "app", fileName);
-                    if (File.Exists(appCompanion))
-                    {
-                        if (MigrateSingleRootStateFile(appCompanion, Path.Combine(normData, fileName)))
-                        {
-                            migratedAny = true;
-                        }
-                    }
-                }
-
-                if (Directory.Exists(normRoot))
-                {
-                    foreach (string bakFile in Directory.EnumerateFiles(normRoot, "settings.json.bak*", SearchOption.TopDirectoryOnly))
-                    {
-                        string name = Path.GetFileName(bakFile);
-                        if (MigrateSingleRootStateFile(bakFile, Path.Combine(normData, name)))
-                        {
-                            migratedAny = true;
-                        }
-                    }
-                }
-
-                string[] runtimeDataDirs = { "dats", "tools", "manifests", "cache", "crashes" };
-                foreach (string dirName in runtimeDataDirs)
-                {
-                    string srcDir = Path.Combine(normRoot, dirName);
-                    string dstDir = Path.Combine(normData, dirName);
-                    if (Directory.Exists(srcDir))
-                    {
-                        MoveOrMergeDirectory(srcDir, dstDir);
-                        migratedAny = true;
-                    }
-                }
-
-                string rootWebViewCache = Path.Combine(normRoot, "WebView2Cache");
-                string dstWebViewCache = Path.Combine(normData, "webview2_cache");
-                if (Directory.Exists(rootWebViewCache))
-                {
-                    MoveOrMergeDirectory(rootWebViewCache, dstWebViewCache);
-                    migratedAny = true;
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ConfigService] MigrateLegacyRootStateIfPresent ignored: {ex.Message}");
-            }
-
-            return migratedAny;
-        }
-
-        private static bool MigrateSingleRootStateFile(string srcFile, string dstFile)
-        {
-            if (!File.Exists(srcFile))
-                return false;
-
-            try
-            {
-                long srcLen = new FileInfo(srcFile).Length;
-                long dstLen = File.Exists(dstFile) ? new FileInfo(dstFile).Length : 0;
-                if (!File.Exists(dstFile) || srcLen > dstLen)
-                {
-                    File.Copy(srcFile, dstFile, overwrite: true);
-                }
-                File.Delete(srcFile);
-                return true;
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ConfigService] MigrateSingleRootStateFile ({srcFile}) ignored: {ex.Message}");
-                return false;
-            }
-        }
-
-        private static void MoveOrMergeDirectory(string srcDir, string dstDir)
-        {
-            try
-            {
-                if (!Directory.Exists(srcDir))
-                    return;
-
-                if (!Directory.Exists(dstDir))
-                {
-                    try
-                    {
-                        Directory.Move(srcDir, dstDir);
-                        return;
-                    }
-                    catch (Exception moveEx)
-                    {
-                        System.Diagnostics.Debug.WriteLine($"[ConfigService] Directory.Move fallback to recursive merge ({srcDir}): {moveEx.Message}");
-                    }
-                }
-
-                Directory.CreateDirectory(dstDir);
-                foreach (string file in Directory.GetFiles(srcDir, "*", SearchOption.TopDirectoryOnly))
-                {
-                    string destFile = Path.Combine(dstDir, Path.GetFileName(file));
-                    MigrateSingleRootStateFile(file, destFile);
-                }
-
-                foreach (string sub in Directory.GetDirectories(srcDir, "*", SearchOption.TopDirectoryOnly))
-                {
-                    string destSub = Path.Combine(dstDir, Path.GetFileName(sub));
-                    MoveOrMergeDirectory(sub, destSub);
-                }
-
-                if (!Directory.EnumerateFileSystemEntries(srcDir).Any())
-                {
-                    Directory.Delete(srcDir, recursive: false);
-                }
-                else
-                {
-                    Directory.Delete(srcDir, recursive: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ConfigService] MoveOrMergeDirectory ({srcDir} -> {dstDir}) ignored: {ex.Message}");
-            }
-        }
-
         private void TryAdoptParentCanonicalSettings(string dataDir, string activeConfigPath)
         {
             try
@@ -440,50 +254,6 @@ namespace Housekeeping.Services
                    (val.Equals("1", StringComparison.OrdinalIgnoreCase) ||
                     val.Equals("true", StringComparison.OrdinalIgnoreCase) ||
                     val.Equals("yes", StringComparison.OrdinalIgnoreCase));
-        }
-
-        public static void AtomicWriteAllText(string targetPath, string content)
-        {
-            string? dir = Path.GetDirectoryName(targetPath);
-            if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                Directory.CreateDirectory(dir);
-
-            string tmpPath = targetPath + ".tmp";
-            File.WriteAllText(tmpPath, content, Encoding.UTF8);
-
-            for (int attempt = 1; attempt <= 3; attempt++)
-            {
-                try
-                {
-                    File.Move(tmpPath, targetPath, overwrite: true);
-                    return;
-                }
-                catch (IOException) when (attempt < 3)
-                {
-                    System.Threading.Thread.Sleep(50 * attempt);
-                }
-            }
-
-            File.Copy(tmpPath, targetPath, overwrite: true);
-            try { File.Delete(tmpPath); } catch (System.Exception __suppressedEx1) { System.Diagnostics.Debug.WriteLine($"[ConfigService] Non-fatal error ignored: {__suppressedEx1.Message}"); }
-        }
-
-        public static string ReadAllTextWithRetry(string path, int maxAttempts = 3, int delayMs = 150)
-        {
-            for (int attempt = 1; attempt <= maxAttempts; attempt++)
-            {
-                try
-                {
-                    using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-                    using var sr = new StreamReader(fs, Encoding.UTF8);
-                    return sr.ReadToEnd();
-                }
-                catch (IOException) when (attempt < maxAttempts)
-                {
-                    System.Threading.Thread.Sleep(delayMs * attempt);
-                }
-            }
-            return File.ReadAllText(path);
         }
 
         public void Load()
@@ -533,6 +303,8 @@ namespace Housekeeping.Services
                             if (loaded.HandBrakeProfiles == null || loaded.HandBrakeProfiles.Count == 0)
                                 loaded.HandBrakeProfiles = HandBrakeEncodingProfile.CreateDefaultProfiles();
 
+                            SanitizeDeprecatedModule4ManifestFlags(loaded);
+                            loaded.UiLayout ??= new UiLayoutConfig();
                             loaded.MigrateLegacyModulesToJobsIfNeeded();
                             loaded.EnsureNamedQueuesInitialized();
                             loaded.EnsureDefinedJobsSynchronized();
@@ -567,37 +339,6 @@ namespace Housekeeping.Services
                 Config = AppConfig.CreateDefaults();
                 Config.WebServer.EnsureNodeApiTokenInitialized();
                 Save();
-            }
-        }
-
-        public static void MigrateConfig(AppConfig config, int fromVersion, int toVersion)
-        {
-            if (fromVersion < 2)
-            {
-                if (config.HandBrakeProfiles == null || config.HandBrakeProfiles.Count == 0)
-                    config.HandBrakeProfiles = HandBrakeEncodingProfile.CreateDefaultProfiles();
-
-                config.MigrateLegacyModulesToJobsIfNeeded();
-
-                if (config.DistributedLockTimeoutMinutes <= 0)
-                    config.DistributedLockTimeoutMinutes = 90;
-                config.EnableDistributedNetworkLocking = true;
-            }
-
-            if (fromVersion < 3)
-            {
-                config.EnsureNamedQueuesInitialized();
-                config.EnsureDefinedJobsSynchronized();
-            }
-
-            if (fromVersion < 4)
-            {
-                if (config.WebServer != null &&
-                    (string.IsNullOrWhiteSpace(config.WebServer.DefaultDesktopLaunchMode) ||
-                     string.Equals(config.WebServer.DefaultDesktopLaunchMode, "Browser", StringComparison.OrdinalIgnoreCase)))
-                {
-                    config.WebServer.DefaultDesktopLaunchMode = "StandaloneWindow";
-                }
             }
         }
 

@@ -5,11 +5,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Housekeeping.Models;
-using MediaInfoLib;
-
 namespace Housekeeping.Services.Modules
 {
-    public static class MediaTranscoderModule
+    public static partial class MediaTranscoderModule
     {
         public static async Task RunAsync(ModuleExecutionContext ctx, CancellationToken ct)
         {
@@ -143,7 +141,7 @@ namespace Housekeeping.Services.Modules
             foreach (var f in rootDir.EnumerateFiles(searchPattern, topEnumOpts))
             {
                 ct.ThrowIfCancellationRequested();
-                if (allowedDotExts.Contains(f.Extension) && !f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase))
+                if (allowedDotExts.Contains(f.Extension) && !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name))
                     results.Add(f);
             }
 
@@ -160,7 +158,7 @@ namespace Housekeeping.Services.Modules
                 foreach (var f in subDir.EnumerateFiles(searchPattern, recurseEnumOpts))
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (allowedDotExts.Contains(f.Extension) && !f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase))
+                    if (allowedDotExts.Contains(f.Extension) && !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name))
                         results.Add(f);
                 }
             }
@@ -322,6 +320,12 @@ namespace Housekeeping.Services.Modules
                 return;
             }
 
+            if (ShouldDeferForSisterMediaLock(sourceDir, ctx.Log))
+            {
+                ctx.Stats.Skipped++;
+                return;
+            }
+
             string newFile = BuildOutputTierFilePath(foundFile, sourceTag, cfg.MasterFileTag, resCode);
             if (NetworkSafetyService.PurgeZeroByteFileIfExists(newFile))
             {
@@ -352,7 +356,7 @@ namespace Housekeeping.Services.Modules
 
                 ctx.Log("WARN", $"  -> [Update] Deleting non-HEVC {resCode} file for re-encoding...");
                 try { File.Delete(newFile); }
-                catch { ctx.Log("ERROR", $"     Could not delete file: {Path.GetFileName(newFile)}"); }
+                catch (Exception ex) { ctx.Log("ERROR", $"     Could not delete file '{Path.GetFileName(newFile)}': {ex.Message}"); }
                 exists = File.Exists(newFile);
             }
 
@@ -420,6 +424,7 @@ namespace Housekeeping.Services.Modules
                     {
                         if (File.Exists(newFile))
                         {
+                            CopyCompanionSubtitlesForOutput(foundFile, newFile, ctx.Log);
                             ctx.Log("SUCCESS", $"  -> [Done] Created {resCode}");
                         }
                         else
@@ -463,6 +468,13 @@ namespace Housekeeping.Services.Modules
 
             string dir = foundFile.DirectoryName ?? "";
             string baseName = Path.GetFileNameWithoutExtension(foundFile.Name);
+            int baseBraceIdx = baseName.IndexOf('{');
+            if (baseBraceIdx > 0)
+            {
+                string cleanStem = baseName.Substring(0, baseBraceIdx).TrimEnd();
+                string editionPart = baseName.Substring(baseBraceIdx);
+                return Path.Combine(dir, $"{cleanStem} ({resCode}) {editionPart}{foundFile.Extension}");
+            }
             return Path.Combine(dir, $"{baseName} ({resCode}){foundFile.Extension}");
         }
 
@@ -636,112 +648,6 @@ namespace Housekeeping.Services.Modules
             }
 
             return newFile;
-        }
-
-        private static int GetVideoHeightPx(string filePath)
-        {
-            try
-            {
-                if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0)
-                    return 0;
-            }
-            catch { return 0; }
-
-            var mediaInfo = new MediaInfo();
-            try
-            {
-                if (mediaInfo.Open(filePath) == 0)
-                    return 0;
-
-                string heightStr = mediaInfo.Get(StreamKind.Video, 0, "Height");
-                return int.TryParse(heightStr, out int h) ? h : 0;
-            }
-            catch
-            {
-                return 0;
-            }
-            finally
-            {
-                try { mediaInfo.Close(); } catch (System.Exception __suppressedEx1) { System.Diagnostics.Debug.WriteLine($"[MediaTranscoderModule] Non-fatal error ignored: {__suppressedEx1.Message}"); }
-            }
-        }
-
-        private static bool CheckFileIsHevc(string filePath, bool isRemoteMode)
-        {
-            if (isRemoteMode)
-                return true;
-
-            try
-            {
-                if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0)
-                    return false;
-            }
-            catch { return false; }
-
-            var mediaInfo = new MediaInfo();
-            try
-            {
-                if (mediaInfo.Open(filePath) == 0)
-                    return true;
-
-                string videoStreams = mediaInfo.Get(StreamKind.General, 0, "VideoCount");
-                if (int.TryParse(videoStreams, out int videoCount) && videoCount > 0)
-                {
-                    string format = mediaInfo.Get(StreamKind.Video, 0, "Format");
-                    string codec = mediaInfo.Get(StreamKind.Video, 0, "CodecID");
-
-                    return format.Equals("HEVC", StringComparison.OrdinalIgnoreCase) ||
-                           codec.Contains("hvc1", StringComparison.OrdinalIgnoreCase) ||
-                           codec.Contains("hevc", StringComparison.OrdinalIgnoreCase) ||
-                           codec.Contains("x265", StringComparison.OrdinalIgnoreCase) ||
-                           codec.Contains("hev1", StringComparison.OrdinalIgnoreCase);
-                }
-            }
-            catch
-            {
-                return true;
-            }
-            finally
-            {
-                try { mediaInfo.Close(); } catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[MediaTranscoderModule] Non-fatal error ignored: {__suppressedEx2.Message}"); }
-            }
-
-            return false;
-        }
-
-        private static bool HasLanguageTrack(string filePath, string languageCode)
-        {
-            try
-            {
-                if (!File.Exists(filePath) || new FileInfo(filePath).Length == 0)
-                    return false;
-            }
-            catch { return false; }
-
-            var mediaInfo = new MediaInfo();
-            try
-            {
-                if (mediaInfo.Open(filePath) == 0)
-                    return false;
-
-                int audioTracks = int.TryParse(mediaInfo.Get(StreamKind.Audio, 0, "StreamCount"), out int tracks) ? tracks : 0;
-                for (int i = 0; i < audioTracks; i++)
-                {
-                    string lang = mediaInfo.Get(StreamKind.Audio, i, "Language/String3");
-                    if (lang.Equals(languageCode, StringComparison.OrdinalIgnoreCase))
-                        return true;
-                }
-            }
-            catch
-            {
-                return false;
-            }
-            finally
-            {
-                try { mediaInfo.Close(); } catch (System.Exception __suppressedEx3) { System.Diagnostics.Debug.WriteLine($"[MediaTranscoderModule] Non-fatal error ignored: {__suppressedEx3.Message}"); }
-            }
-
-            return false;
         }
     }
 }

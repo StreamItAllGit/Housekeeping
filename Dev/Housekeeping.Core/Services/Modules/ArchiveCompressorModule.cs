@@ -56,6 +56,14 @@ namespace Housekeeping.Services.Modules
                     continue;
                 }
 
+                if (NetworkSafetyService.HasActiveDirectoryOrParentLock(inPath, "housekeeping", out string? activeOwner, out string? activeLock, scanImmediateSubdirectories: true, ctx.Log) ||
+                    NetworkSafetyService.HasActiveDirectoryOrParentLock(outPath, "housekeeping", out activeOwner, out activeLock, scanImmediateSubdirectories: false, ctx.Log))
+                {
+                    ctx.Log("WARN", $"[Coexistence Defer] Deferring Video Archive mapping '{label}' — active sentinel lock '{activeLock}' held by '{activeOwner}'.");
+                    ctx.Stats.Skipped++;
+                    continue;
+                }
+
                 var dirInfo = new DirectoryInfo(inPath);
                 var files = new List<FileInfo>();
                 var safeEnumOpts = new EnumerationOptions { IgnoreInaccessible = true, RecurseSubdirectories = true };
@@ -73,7 +81,7 @@ namespace Housekeeping.Services.Modules
                     }
                 }
 
-                files = files.Where(f => !f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase)).ToList();
+                files = files.Where(f => !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name)).ToList();
                 ctx.Log("INFO", $"Found {files.Count} candidate file(s) in '{label}'.");
 
                 int number = 0;

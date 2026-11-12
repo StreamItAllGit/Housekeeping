@@ -10,58 +10,19 @@ using System.Text.RegularExpressions;
 
 namespace Housekeeping.Models
 {
-    public enum ModuleId
-    {
-        ProxyGenerator,
-        ArchiveCompressor,
-        MediaTranscoder,
-        RomLauncherGenerator,
-        CloudSync,
-        HumbleSync,
-        CustomScripts,
-        CollectionManifest
-    }
-
-    public enum TaskRunState
-    {
-        Idle,
-        Running,
-        Paused,
-        WaitingForNetwork,
-        Completed,
-        Failed,
-        Skipped
-    }
-
-    public enum SourceDetectionMode
-    {
-        FilenameTagMatching,
-        MediaInfoResolutionScan
-    }
-
-    public enum FooterVerbosityLevel
-    {
-        AlertsOnly,
-        Quiet,
-        ProgressAndStatus,
-        Everything,
-        Custom
-    }
-
-    public enum VerbosityLevel
-    {
-        AlertsOnly = 0,
-        Quiet = 1,
-        ProgressAndStatus = 2,
-        Everything = 3,
-        Custom = 4
-    }
+    public enum ModuleId { ProxyGenerator, ArchiveCompressor, MediaTranscoder, RomLauncherGenerator, CloudSync, HumbleSync, CustomScripts, CollectionManifest }
+    public enum TaskRunState { Idle, Running, Paused, WaitingForNetwork, Completed, Failed, Skipped }
+    public enum SourceDetectionMode { FilenameTagMatching, MediaInfoResolutionScan }
+    public enum FooterVerbosityLevel { AlertsOnly, Quiet, ProgressAndStatus, Everything, Custom }
+    public enum VerbosityLevel { AlertsOnly = 0, Quiet = 1, ProgressAndStatus = 2, Everything = 3, Custom = 4 }
 
     public enum HashSidecarMode
     {
+        DatabaseOnly = 0,
         None = 0,
         SidecarBeside = 1,
-        PackageInsideArchive = 2
+        PackageInsideArchive = 2,
+        SidecarAndArchive = 3
     }
 
     public enum AuditStructureMode
@@ -134,7 +95,7 @@ namespace Housekeeping.Models
             => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
-    public class AppConfig : ObservableObject
+    public partial class AppConfig : ObservableObject
     {
         public const int CurrentSchemaVersion = 4;
         public int ConfigVersion { get; set; } = CurrentSchemaVersion;
@@ -1375,8 +1336,8 @@ namespace Housekeeping.Models
         // Multi-Path Sync Collections
         public List<GameSyncPathItem> DefaultSyncPaths { get; set; } = new();
 
-        // ROM Collection Verification Manifest & Redump/No-Intro Auditing
-        public bool EnableCollectionManifestCsv { get; set; } = true;
+        // Legacy compatibility flag (deprecated in v0.1.12; Module 8 / ShadowLibrary handles DAT/manifest/sidecar auditing)
+        public bool EnableCollectionManifestCsv { get; set; } = false;
         public string ManifestCsvFileName { get; set; } = "collection_manifest.csv";
         public string DatFilesDirectory { get; set; } = "./dats/";
         public bool AutoDownloadMissingDats { get; set; } = true;
@@ -1507,7 +1468,7 @@ namespace Housekeeping.Models
             CreateStartMenuShortcuts = false,
             CreateLocalLauncherNextToArchive = false,
             RefreshExistingLaunchers = false,
-            EnableCollectionManifestCsv = true,
+            EnableCollectionManifestCsv = false,
             ManifestCsvFileName = "collection_manifest.csv",
             DatFilesDirectory = "./dats/",
             AutoDownloadMissingDats = true,
@@ -1765,12 +1726,15 @@ namespace Housekeeping.Models
         public bool CheckInnerArchiveAndContainer { get; set; } = true;
         public HashSidecarMode HashFilePlacement { get; set; } = HashSidecarMode.SidecarBeside;
         public string HashAlgorithm { get; set; } = "SHA-1"; // SHA-1, CRC32, MD5, SHA-256
+        public bool SkipShadowLibraryManagedRoots { get; set; } = true;
+        public bool SyncPostInjectionContainerHashJson { get; set; } = true;
+        public bool CleanDisallowedHashFilesOnMigrate { get; set; } = false;
 
         // Legacy / Compatibility Aliases
         public bool EnableFileHashing { get => EnableBitRotDetection; set => EnableBitRotDetection = value; }
         public bool SkipExistingVerifiedHashes { get; set; } = true;
         public bool GenerateHashSidecars { get => CreateMissingHashFiles; set => CreateMissingHashFiles = value; }
-        public bool PackageHashIntoArchives { get => HashFilePlacement == HashSidecarMode.PackageInsideArchive; set { if (value) HashFilePlacement = HashSidecarMode.PackageInsideArchive; } }
+        public bool PackageHashIntoArchives { get => HashFilePlacement is HashSidecarMode.PackageInsideArchive or HashSidecarMode.SidecarAndArchive; set { if (value && HashFilePlacement == HashSidecarMode.SidecarBeside) HashFilePlacement = HashSidecarMode.PackageInsideArchive; } }
         public bool DeepInspectAndHashInnerRoms { get => CheckInnerArchiveAndContainer; set => CheckInnerArchiveAndContainer = value; }
         public bool TrustExistingHashFiles { get; set; } = true;
         public AuditStructureMode StructureMode { get; set; } = AuditStructureMode.Auto;
@@ -2112,49 +2076,6 @@ namespace Housekeeping.Models
         }
     }
 
-    public class RemoteNodeConfig : ObservableObject
-    {
-        private string _id = Guid.NewGuid().ToString("N");
-        private string _name = "Remote Server";
-        private string _hostOrIp = "";
-        private string _remoteAppPath = @"C:\Programs\Housekeeping";
-        private RemoteConnectionType _connectionType = RemoteConnectionType.WindowsUncShare;
-        private int _port = 445;
-        private string _username = "";
-        private string _password = "";
-        private string _privateKeyPath = "";
-        private int _httpApiPort = 5178;
-        private string _apiToken = "";
-        private bool _preferHttpApi = true;
-
-        public string Id { get => _id; set { _id = value; OnPropertyChanged(); } }
-        public string Name { get => _name; set { _name = value; OnPropertyChanged(); } }
-        public string HostOrIp { get => _hostOrIp; set { _hostOrIp = value; OnPropertyChanged(); } }
-        public string RemoteAppPath { get => _remoteAppPath; set { _remoteAppPath = value; OnPropertyChanged(); } }
-        public RemoteConnectionType ConnectionType { get => _connectionType; set { _connectionType = value; OnPropertyChanged(); } }
-        public int Port { get => _port; set { _port = value; OnPropertyChanged(); } }
-        public string Username { get => _username; set { _username = value; OnPropertyChanged(); } }
-        public string Password { get => _password; set { _password = value; OnPropertyChanged(); } }
-        public string PrivateKeyPath { get => _privateKeyPath; set { _privateKeyPath = value; OnPropertyChanged(); } }
-        public int HttpApiPort { get => _httpApiPort; set { _httpApiPort = value; OnPropertyChanged(); } }
-        public string ApiToken { get => _apiToken; set { _apiToken = value ?? ""; OnPropertyChanged(); } }
-        public bool PreferHttpApi { get => _preferHttpApi; set { _preferHttpApi = value; OnPropertyChanged(); } }
-
-        // Runtime status (Not serialized)
-        [JsonIgnore] public string DetectedVersion { get; set; } = "Unknown";
-        [JsonIgnore] public bool IsReachable { get; set; } = false;
-        [JsonIgnore] public bool CanUpdateApp { get; set; } = false;
-        [JsonIgnore] public bool CanUpdateSettings { get; set; } = false;
-        [JsonIgnore] public string StatusMessage { get; set; } = "Not connected";
-        [JsonIgnore] public SystemPerformanceStats? LastStats { get; set; }
-
-        public RemoteNodeConfig Clone()
-        {
-            string json = JsonSerializer.Serialize(this);
-            return JsonSerializer.Deserialize<RemoteNodeConfig>(json) ?? new RemoteNodeConfig();
-        }
-    }
-
     public class NamedJobQueue : ObservableObject
     {
         private string _id = Guid.NewGuid().ToString("N");
@@ -2215,119 +2136,6 @@ namespace Housekeeping.Models
                 j.JobId = Guid.NewGuid().ToString("N");
             }
             return copy;
-        }
-    }
-
-    public class RunHistoryEntry
-    {
-        public DateTime StartedAt { get; set; }
-        public DateTime CompletedAt { get; set; }
-        public string TriggerSource { get; set; } = "Manual";
-        public string ModulesSummary { get; set; } = "";
-        public int ItemsProcessed { get; set; }
-        public int ItemsSkipped { get; set; }
-        public int ErrorsCount { get; set; }
-        public string Status { get; set; } = "Completed";
-        public string LogFilePath { get; set; } = "";
-
-        [JsonIgnore]
-        public string DurationText => (CompletedAt - StartedAt).ToString(@"hh\:mm\:ss");
-    }
-
-    public static class UiOptionsCatalog
-    {
-        public static readonly string[] EmulatorRunners =
-        {
-            "RetroArch", "PCSX2", "DuckStation", "RPCS3", "PPSSPP", "Dolphin",
-            "Flycast", "Redream", "Project64", "melonDS", "Citra", "Cemu",
-            "Xemu", "Xenia", "Custom"
-        };
-
-        public static readonly string[] VideoCodecs =
-        {
-            "x265", "x265_10bit", "x264", "nvenc_h265", "nvenc_h264",
-            "qsv_h265", "vce_h265", "svt_av1"
-        };
-
-        public static readonly string[] EncoderPresets =
-        {
-            "ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower"
-        };
-
-        public static readonly string[] ContainerExtensions =
-        {
-            ".mkv", ".mp4"
-        };
-
-        public static readonly string[] AudioCodecs =
-        {
-            "av_aac", "ac3", "eac3", "copy", "copy:aac", "copy:ac3"
-        };
-
-        public static readonly string[] SubtitleModes =
-        {
-            "none", "first", "burned"
-        };
-
-        public static readonly string[] RcloneModes =
-        {
-            "bisync", "sync", "copy"
-        };
-
-        public static List<FolderTargetItem> DiscoverSubfolderTargets(string parentDirectory)
-        {
-            var result = new List<FolderTargetItem>();
-            if (string.IsNullOrWhiteSpace(parentDirectory) || !Directory.Exists(parentDirectory))
-                return result;
-
-            foreach (string dir in Directory.GetDirectories(parentDirectory, "*", SearchOption.TopDirectoryOnly))
-            {
-                string folderName = Path.GetFileName(dir);
-                if (string.IsNullOrWhiteSpace(folderName) || folderName.StartsWith('.'))
-                    continue;
-                result.Add(new FolderTargetItem { Enabled = true, Path = dir });
-            }
-
-            return result;
-        }
-
-        public static List<ArchiveMappingItem> DiscoverPairedSubfolderMappings(string parentSourceDir, string parentArchiveDestDir)
-        {
-            var result = new List<ArchiveMappingItem>();
-            if (string.IsNullOrWhiteSpace(parentSourceDir) || !Directory.Exists(parentSourceDir) ||
-                string.IsNullOrWhiteSpace(parentArchiveDestDir))
-            {
-                return result;
-            }
-
-            foreach (string subSource in Directory.GetDirectories(parentSourceDir, "*", SearchOption.TopDirectoryOnly))
-            {
-                string folderName = Path.GetFileName(subSource);
-                if (string.IsNullOrWhiteSpace(folderName) || folderName.StartsWith('.'))
-                    continue;
-
-                result.Add(new ArchiveMappingItem
-                {
-                    Enabled = true,
-                    Name = folderName,
-                    SourcePath = subSource,
-                    ArchiveOutputPath = Path.Combine(parentArchiveDestDir, folderName)
-                });
-            }
-
-            return result;
-        }
-
-        public static string FormatFreeSpaceShort(long freeBytes)
-        {
-            double tb = freeBytes / (1024.0 * 1024 * 1024 * 1024);
-            if (tb >= 1.0)
-                return $"{tb:0.#} TB";
-            double gb = freeBytes / (1024.0 * 1024 * 1024);
-            if (gb >= 1.0)
-                return $"{gb:0.#} GB";
-            double mb = freeBytes / (1024.0 * 1024);
-            return $"{mb:0} MB";
         }
     }
 }

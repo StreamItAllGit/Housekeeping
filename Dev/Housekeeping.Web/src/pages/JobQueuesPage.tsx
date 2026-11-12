@@ -1,17 +1,13 @@
+// @module: Housekeeping.Web/pages/JobQueuesPage
+// @purpose: Named Job Queue orchestrator with extracted schedule controls, ordered step pipeline, and hover hints.
+// @depends-on: react, ../context/AppStateContext, ../hints/jobQueues, ../services/apiClient, ../types/models, ./queues/QueueScheduleControls
+// @exports: JobQueuesPage
 import React, { useEffect, useState } from 'react';
 import { useAppState } from '../context/AppStateContext';
+import { JOB_QUEUES_HINTS } from '../hints/jobQueues';
 import { apiClient } from '../services/apiClient';
-import { MODULE_METADATA, type MasterScheduleMode } from '../types/models';
-
-const DAYS_OF_WEEK = [
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-  'Sunday',
-];
+import { MODULE_METADATA } from '../types/models';
+import { DAYS_OF_WEEK, QueueScheduleControls } from './queues/QueueScheduleControls';
 
 export const JobQueuesPage: React.FC = () => {
   const {
@@ -51,7 +47,8 @@ export const JobQueuesPage: React.FC = () => {
         .then((res) => {
           if (!cancelled) setUpcomingRuns(res.upcomingUtc || []);
         })
-        .catch(() => {
+        .catch((err) => {
+          console.debug('[JobQueues] upcoming preview failed:', err);
           if (!cancelled) setUpcomingRuns([]);
         });
     }, 350);
@@ -146,20 +143,15 @@ export const JobQueuesPage: React.FC = () => {
 
   return (
     <div className="hk-builder-layout">
-      {/* Mobile Quick Queue Switcher Bar (<= 768px only) */}
       <div className="hk-mobile-only hk-mobile-switcher-bar">
-        <span style={{ fontSize: 13 }} aria-hidden="true">
-          🗂
-        </span>
+        <span style={{ fontSize: 13 }} aria-hidden="true">🗂</span>
         <select
           className="hk-select"
           value={activeQueue.Id}
           onChange={(e) => {
             const id = e.target.value;
             setSelectedQueueId(id);
-            updateConfig((d) => {
-              d.ActiveQueueId = id;
-            });
+            updateConfig((d) => (d.ActiveQueueId = id));
           }}
           aria-label="Quick switch active job queue"
         >
@@ -188,10 +180,7 @@ export const JobQueuesPage: React.FC = () => {
         </button>
       </div>
 
-      {/* Left Sidebar: Named Queues (permanently visible on desktop; toggled on mobile) */}
-      <div
-        className={`hk-card hk-mobile-collapsible-sidebar ${mobileQueuesOpen ? '' : 'collapsed'}`}
-      >
+      <div className={`hk-card hk-mobile-collapsible-sidebar ${mobileQueuesOpen ? '' : 'collapsed'}`}>
         <div className="hk-row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
           <strong>Named Queues ({queues.length})</strong>
           <button type="button" className="hk-btn sm primary" onClick={handleCreateQueue}>
@@ -208,16 +197,14 @@ export const JobQueuesPage: React.FC = () => {
                 className={`hk-job-item ${q.Id === activeQueue.Id ? 'active' : ''}`}
                 onClick={() => {
                   setSelectedQueueId(q.Id);
-                  updateConfig((d) => {
-                    d.ActiveQueueId = q.Id;
-                  });
+                  updateConfig((d) => (d.ActiveQueueId = q.Id));
                   setMobileQueuesOpen(false);
                 }}
               >
                 <div style={{ flex: 1 }}>
                   <div className="hk-row" style={{ justifyContent: 'space-between' }}>
                     <strong>{q.Name}</strong>
-                    {isDefaultActive && <span className="hk-pill accent">Active</span>}
+                    {isDefaultActive && <span className="hk-pill accent nowrap">Active</span>}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', marginTop: 2 }}>
                     {q.Jobs.filter((j) => j.Enabled).length}/{q.Jobs.length} enabled •{' '}
@@ -230,7 +217,6 @@ export const JobQueuesPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Right Pane: Queue Metadata, Schedule Configurator & Ordered Pipeline */}
       <div>
         <div className="hk-card">
           <div className="hk-card-header">
@@ -287,9 +273,7 @@ export const JobQueuesPage: React.FC = () => {
                 disabled={blockSelectedQueueTrigger}
                 onClick={() => void handleRunThisQueue(true)}
               >
-                {pipelineState.IsRunning && !blockSelectedQueueTrigger
-                  ? '🧪 Queue Dry Run'
-                  : '🧪 Dry Run'}
+                {pipelineState.IsRunning && !blockSelectedQueueTrigger ? '🧪 Queue Dry Run' : '🧪 Dry Run'}
               </button>
               <button
                 type="button"
@@ -302,157 +286,13 @@ export const JobQueuesPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Independent Queue Schedule Configurator */}
-          <div
-            style={{
-              padding: 12,
-              borderRadius: 'var(--radius-md)',
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div className="hk-row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
-              <label className="hk-checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={activeQueue.EnableSchedule}
-                  onChange={(e) =>
-                    updateConfig((d) => {
-                      const q = d.NamedQueues.find((x) => x.Id === activeQueue.Id);
-                      if (q) q.EnableSchedule = e.target.checked;
-                    })
-                  }
-                />
-                <strong>⏰ Enable Automatic Schedule for &ldquo;{activeQueue.Name}&rdquo;</strong>
-              </label>
-
-              {activeQueue.LastRunUtc && (
-                <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                  Last Scheduled Run: {new Date(activeQueue.LastRunUtc).toLocaleString()}
-                </span>
-              )}
-            </div>
-
-            <div className="hk-grid-3" style={{ marginBottom: 10 }}>
-              <div className="hk-field">
-                <label className="hk-field-label">Schedule Cadence Mode</label>
-                <select
-                  className="hk-select"
-                  disabled={!activeQueue.EnableSchedule}
-                  value={activeQueue.ScheduleMode}
-                  onChange={(e) =>
-                    updateConfig((d) => {
-                      const q = d.NamedQueues.find((x) => x.Id === activeQueue.Id);
-                      if (q) q.ScheduleMode = e.target.value as MasterScheduleMode;
-                    })
-                  }
-                >
-                  <option value="DailyTime">Daily at Specific Time (HH:mm)</option>
-                  <option value="IntervalCadence">Recurring Interval (Minutes)</option>
-                  <option value="SpecificTimes">Multiple Daily Times (CSV)</option>
-                </select>
-              </div>
-
-              {activeQueue.ScheduleMode === 'DailyTime' && (
-                <div className="hk-field">
-                  <label className="hk-field-label">Daily Time (24h HH:mm)</label>
-                  <input
-                    type="time"
-                    className="hk-input mono"
-                    disabled={!activeQueue.EnableSchedule}
-                    value={activeQueue.ScheduleDailyTime}
-                    onChange={(e) =>
-                      updateConfig((d) => {
-                        const q = d.NamedQueues.find((x) => x.Id === activeQueue.Id);
-                        if (q) q.ScheduleDailyTime = e.target.value;
-                      })
-                    }
-                  />
-                </div>
-              )}
-
-              {activeQueue.ScheduleMode === 'IntervalCadence' && (
-                <div className="hk-field">
-                  <label className="hk-field-label">Interval (Minutes)</label>
-                  <input
-                    type="number"
-                    min={5}
-                    className="hk-input"
-                    disabled={!activeQueue.EnableSchedule}
-                    value={activeQueue.ScheduleIntervalMinutes}
-                    onChange={(e) =>
-                      updateConfig((d) => {
-                        const q = d.NamedQueues.find((x) => x.Id === activeQueue.Id);
-                        if (q) q.ScheduleIntervalMinutes = Math.max(5, Number(e.target.value) || 60);
-                      })
-                    }
-                  />
-                </div>
-              )}
-
-              {activeQueue.ScheduleMode === 'SpecificTimes' && (
-                <div className="hk-field">
-                  <label className="hk-field-label">Times CSV (e.g. 03:00, 12:00, 18:00)</label>
-                  <input
-                    type="text"
-                    className="hk-input mono"
-                    disabled={!activeQueue.EnableSchedule}
-                    value={activeQueue.ScheduleSpecificTimesCsv}
-                    onChange={(e) =>
-                      updateConfig((d) => {
-                        const q = d.NamedQueues.find((x) => x.Id === activeQueue.Id);
-                        if (q) q.ScheduleSpecificTimesCsv = e.target.value;
-                      })
-                    }
-                  />
-                </div>
-              )}
-
-              <div className="hk-field">
-                <label className="hk-field-label">Active Days of Week</label>
-                <div className="hk-row" style={{ gap: 4 }}>
-                  {DAYS_OF_WEEK.map((day) => {
-                    const checked = (activeQueue.ScheduleDays || []).includes(day);
-                    return (
-                      <button
-                        key={day}
-                        type="button"
-                        disabled={!activeQueue.EnableSchedule}
-                        className={`hk-btn sm ${checked ? 'primary' : ''}`}
-                        onClick={() =>
-                          updateConfig((d) => {
-                            const q = d.NamedQueues.find((x) => x.Id === activeQueue.Id);
-                            if (!q) return;
-                            if (q.ScheduleDays.includes(day)) {
-                              q.ScheduleDays = q.ScheduleDays.filter((x) => x !== day);
-                            } else {
-                              q.ScheduleDays.push(day);
-                            }
-                          })
-                        }
-                      >
-                        {day.slice(0, 3)}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {activeQueue.EnableSchedule && upcomingRuns.length > 0 && (
-              <div className="hk-row" style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>
-                <strong>Upcoming 5 Triggers:</strong>
-                {upcomingRuns.map((iso) => (
-                  <span key={iso} className="hk-pill">
-                    {new Date(iso).toLocaleString()}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
+          <QueueScheduleControls
+            activeQueue={activeQueue}
+            upcomingRuns={upcomingRuns}
+            updateConfig={updateConfig}
+          />
         </div>
 
-        {/* Ordered Jobs in Active Queue */}
         <div className="hk-card">
           <div className="hk-card-header">
             <div>
@@ -502,7 +342,9 @@ export const JobQueuesPage: React.FC = () => {
                 type="button"
                 className="hk-btn sm"
                 onClick={() => {
-                  const blob = new Blob([JSON.stringify(activeQueue, null, 2)], { type: 'application/json' });
+                  const blob = new Blob([JSON.stringify(activeQueue, null, 2)], {
+                    type: 'application/json',
+                  });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
@@ -523,10 +365,17 @@ export const JobQueuesPage: React.FC = () => {
             <table className="hk-table stack-mobile">
               <thead>
                 <tr>
-                  <th style={{ width: 55 }}>Order</th>
-                  <th style={{ width: 65, textAlign: 'center' }}>
+                  <th className="hk-has-hint" style={{ width: 55 }} title={JOB_QUEUES_HINTS.thOrder}>
+                    Order
+                  </th>
+                  <th
+                    className="hk-has-hint"
+                    style={{ width: 65, textAlign: 'center' }}
+                    title={JOB_QUEUES_HINTS.thEnabledCol}
+                  >
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
                       checked={activeQueue.Jobs.length > 0 && activeQueue.Jobs.every((j) => j.Enabled)}
                       onChange={(e) => {
                         const targetEnabled = e.target.checked;
@@ -541,15 +390,25 @@ export const JobQueuesPage: React.FC = () => {
                           }
                         });
                       }}
-                      title="Toggle all jobs enabled/disabled in this queue"
+                      title={JOB_QUEUES_HINTS.toggleAllJobs}
                       aria-label="Toggle all jobs enabled"
                     />
                   </th>
-                  <th>Job Name</th>
-                  <th>Module</th>
-                  <th>Post-Job Chain</th>
-                  <th>Live State</th>
-                  <th style={{ width: 220 }}>Actions</th>
+                  <th className="hk-has-hint" title={JOB_QUEUES_HINTS.thJobName}>
+                    Job Name
+                  </th>
+                  <th className="hk-has-hint" title={JOB_QUEUES_HINTS.thModule}>
+                    Module
+                  </th>
+                  <th className="hk-has-hint" title={JOB_QUEUES_HINTS.thChain}>
+                    Post-Job Chain
+                  </th>
+                  <th className="hk-has-hint" title={JOB_QUEUES_HINTS.thLiveState}>
+                    Live State
+                  </th>
+                  <th className="hk-has-hint" style={{ width: 220 }} title={JOB_QUEUES_HINTS.thActions}>
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -574,6 +433,8 @@ export const JobQueuesPage: React.FC = () => {
                       <td data-label="Enabled">
                         <input
                           type="checkbox"
+                          className="hk-has-hint"
+                          title={JOB_QUEUES_HINTS.jobRowEnabled(job.Name)}
                           checked={job.Enabled}
                           onChange={(e) =>
                             updateConfig((d) => {
@@ -590,19 +451,19 @@ export const JobQueuesPage: React.FC = () => {
                         <strong>{job.Name}</strong>
                       </td>
                       <td data-label="Module">
-                        <span className="hk-pill accent">
+                        <span className="hk-pill accent nowrap">
                           {MODULE_METADATA[job.ModuleType]?.badge || job.ModuleType}
                         </span>
                       </td>
                       <td data-label="Post-Job Chain">
                         {chained ? (
-                          <span className="hk-pill ok">↳ {chained.Name}</span>
+                          <span className="hk-pill ok nowrap">↳ {chained.Name}</span>
                         ) : (
                           <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>—</span>
                         )}
                       </td>
                       <td data-label="Live State">
-                        <span className="hk-pill">{live?.State || 'Idle'}</span>
+                        <span className="hk-pill nowrap">{live?.State || 'Idle'}</span>
                       </td>
                       <td data-label="Actions">
                         <div className="hk-row" style={{ gap: 4 }}>

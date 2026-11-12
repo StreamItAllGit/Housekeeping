@@ -1,7 +1,12 @@
+// @module: Housekeeping.Web/pages/editors/ArchiveCompressorEditor
+// @purpose: Module 3 (Video Archive Compressor) editor with ProfileSelect dropdown and 2-line hover hints.
+// @depends-on: react, ../../components/HybridPathPicker, ../../components/ProfileSelect, ../../context/AppStateContext, ../../hints/archiveCompressor, ../../types/models
+// @exports: ArchiveCompressorEditor
 import React from 'react';
-import { ComboSelect } from '../../components/ComboSelect';
 import { HybridPathPicker } from '../../components/HybridPathPicker';
+import { ProfileSelect } from '../../components/ProfileSelect';
 import { useAppState } from '../../context/AppStateContext';
+import { ARCHIVE_COMPRESSOR_HINTS } from '../../hints/archiveCompressor';
 import type { ArchiveCompressorConfig } from '../../types/models';
 
 interface Props {
@@ -19,7 +24,7 @@ export const ArchiveCompressorEditor: React.FC<Props> = ({ cfg, onChange }) => {
         <strong>📦 What This Module Does: Video Archive Compressor</strong>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
           Compresses completed working video directories into space-efficient long-term HEVC/AV1
-          archives while preserving subfolder hierarchy.
+          archives while preserving subfolder hierarchy and honoring StreamEngine <code>.hklock</code> locks.
         </div>
       </div>
 
@@ -28,11 +33,11 @@ export const ArchiveCompressorEditor: React.FC<Props> = ({ cfg, onChange }) => {
         <div className="hk-grid-4" style={{ marginTop: 10 }}>
           <div className="hk-field">
             <label className="hk-field-label">HandBrake Profile</label>
-            <ComboSelect
+            <ProfileSelect
               value={cfg.HandBrakeProfileId}
               options={profileIds}
+              ariaLabel="Archive Compressor HandBrake profile"
               onChange={(v) => onChange((d) => (d.HandBrakeProfileId = v))}
-              placeholder="Archive_LQ"
             />
           </div>
           <div className="hk-field">
@@ -105,11 +110,21 @@ export const ArchiveCompressorEditor: React.FC<Props> = ({ cfg, onChange }) => {
           <table className="hk-table stack-mobile">
             <thead>
               <tr>
-                <th style={{ width: 65 }}>Enabled</th>
-                <th style={{ width: 170 }}>Label</th>
-                <th>Source Folder</th>
-                <th>Archive Destination Folder</th>
-                <th style={{ width: 85 }}>Action</th>
+                <th className="hk-has-hint" style={{ width: 65 }} title={ARCHIVE_COMPRESSOR_HINTS.thEnabled}>
+                  Enabled
+                </th>
+                <th className="hk-has-hint" style={{ width: 170 }} title={ARCHIVE_COMPRESSOR_HINTS.thLabel}>
+                  Label
+                </th>
+                <th className="hk-has-hint" title={ARCHIVE_COMPRESSOR_HINTS.thSourceFolder}>
+                  Source Folder
+                </th>
+                <th className="hk-has-hint" title={ARCHIVE_COMPRESSOR_HINTS.thDestFolder}>
+                  Archive Destination Folder
+                </th>
+                <th className="hk-has-hint" style={{ width: 85 }} title={ARCHIVE_COMPRESSOR_HINTS.thAction}>
+                  Action
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -125,6 +140,8 @@ export const ArchiveCompressorEditor: React.FC<Props> = ({ cfg, onChange }) => {
                   <td data-label="Enabled">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={ARCHIVE_COMPRESSOR_HINTS.mappingEnabled}
                       checked={m.Enabled}
                       onChange={(e) =>
                         onChange((d) => {
@@ -171,11 +188,7 @@ export const ArchiveCompressorEditor: React.FC<Props> = ({ cfg, onChange }) => {
                     <button
                       type="button"
                       className="hk-btn sm danger"
-                      onClick={() =>
-                        onChange((d) => {
-                          d.Mappings.splice(idx, 1);
-                        })
-                      }
+                      onClick={() => onChange((d) => d.Mappings.splice(idx, 1))}
                     >
                       Remove
                     </button>

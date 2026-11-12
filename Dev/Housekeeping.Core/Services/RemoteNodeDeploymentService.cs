@@ -12,18 +12,11 @@ using Housekeeping.Models;
 
 namespace Housekeeping.Services
 {
-    public class RemoteNodeDeploymentService
+    public partial class RemoteNodeDeploymentService
     {
         private static readonly ConcurrentDictionary<string, DateTime> _offlineUncCooldownUntilUtc = new(StringComparer.OrdinalIgnoreCase);
         private static readonly ConcurrentDictionary<string, SemaphoreSlim> _uncSingleFlightGates = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>
-        /// Runs a synchronous UNC SMB filesystem operation behind a per-path single-flight gate,
-        /// a strict wall-clock timeout (.WaitAsync), and an offline/stalled-session cooldown cache.
-        /// Prevents stalled SMB tree-connect/auth sessions (where TCP :445 connects quickly yet
-        /// mrxsmb.sys Directory.Exists blocks for 30-60s) from holding HTTP sockets open or
-        /// starving ThreadPool workers.
-        /// </summary>
         public static async Task<T> RunBoundedUncOperationAsync<T>(
             string? targetUncPath,
             Func<T> syncOperation,
@@ -36,32 +29,24 @@ namespace Housekeeping.Services
             bool isUnc = key.StartsWith(@"\\", StringComparison.Ordinal);
 
             if (!isUnc)
-            {
                 return await Task.Run(syncOperation, ct).ConfigureAwait(false);
-            }
 
             string cooldownKey = $"UNC_OP|{key}";
             if (_offlineUncCooldownUntilUtc.TryGetValue(cooldownKey, out var blockedUntil) && DateTime.UtcNow < blockedUntil)
-            {
                 return fallbackOnTimeoutOrBusy;
-            }
 
             var gate = _uncSingleFlightGates.GetOrAdd(cooldownKey, _ => new SemaphoreSlim(1, 1));
             if (!gate.Wait(0))
-            {
                 return fallbackOnTimeoutOrBusy;
-            }
 
             Task<T> workerTask = Task.Factory.StartNew(
                 () =>
                 {
-                    try
-                    {
-                        return syncOperation();
-                    }
+                    try { return syncOperation(); }
                     finally
                     {
-                        try { gate.Release(); } catch (System.Exception __suppressedEx1) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx1.Message}"); }
+                        try { gate.Release(); }
+                        catch (Exception ex) { Debug.WriteLine($"[RemoteNodeDeploymentService] Gate release ignored: {ex.Message}"); }
                     }
                 },
                 CancellationToken.None,
@@ -83,11 +68,6 @@ namespace Housekeeping.Services
             }
         }
 
-        /// <summary>
-        /// Performs a fast non-blocking TCP port 445 pre-flight check before touching Windows UNC SMB paths
-        /// (e.g. \\SERVER\Share\...) so unreachable hosts return in &lt;= 1.2s without wedging ThreadPool
-        /// threads inside mrxsmb.sys Directory.Exists() for 45-60 seconds.
-        /// </summary>
         public static async Task<bool> IsUncHostReachableFastAsync(
             string? targetPath,
             string? fallbackHostOrIp = null,
@@ -99,7 +79,7 @@ namespace Housekeeping.Services
 
             string trimmed = targetPath.Trim();
             if (!trimmed.StartsWith(@"\\", StringComparison.Ordinal))
-                return true; // Local filesystem path — no SMB network hang risk
+                return true;
 
             string withoutSlashes = trimmed.TrimStart('\\');
             int slashIdx = withoutSlashes.IndexOfAny(new[] { '\\', '/' });
@@ -109,9 +89,7 @@ namespace Housekeeping.Services
 
             string cacheKey = $"{uncHost}|{fallbackHostOrIp ?? ""}";
             if (_offlineUncCooldownUntilUtc.TryGetValue(cacheKey, out var blockedUntil) && DateTime.UtcNow < blockedUntil)
-            {
                 return false;
-            }
 
             bool reachable = await ProbeTcpPortFastAsync(uncHost, 445, timeoutMs, ct).ConfigureAwait(false);
             if (!reachable && !string.IsNullOrWhiteSpace(fallbackHostOrIp) &&
@@ -143,11 +121,13 @@ namespace Housekeeping.Services
                 await tcp.ConnectAsync(host, port, timeoutCts.Token).ConfigureAwait(false);
                 return tcp.Connected;
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"[RemoteNodeDeploymentService] TCP probe failed ({host}:{port}): {ex.Message}");
                 return false;
             }
         }
+
         public static string GetLocalAppVersion()
         {
             try
@@ -163,15 +143,19 @@ namespace Housekeeping.Services
                 var asm = typeof(RemoteNodeDeploymentService).Assembly;
                 var fvi = FileVersionInfo.GetVersionInfo(asm.Location);
                 if (!string.IsNullOrWhiteSpace(fvi.ProductVersion))
-                    return fvi.ProductVersion.Trim();
+                {
+                    string pv = fvi.ProductVersion.Trim();
+                    int plusIdx = pv.IndexOf('+');
+                    return plusIdx > 0 ? pv[..plusIdx] : pv;
+                }
                 if (!string.IsNullOrWhiteSpace(fvi.FileVersion))
                     return fvi.FileVersion.Trim();
-                return asm.GetName().Version?.ToString() ?? "1.0.0-rc.11-hf.1";
+                return asm.GetName().Version?.ToString() ?? "0.1.12";
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[RemoteNodeDeploymentService] GetLocalAppVersion fallback: {ex.Message}");
-                return "1.0.0-rc.11-hf.1";
+                return "0.1.12";
             }
         }
 
@@ -182,11 +166,9 @@ namespace Housekeeping.Services
 
             string clean = versionStr.Trim().TrimStart('v', 'V');
             int metaIdx = clean.IndexOf('+');
-            if (metaIdx > 0)
-                clean = clean.Substring(0, metaIdx);
+            if (metaIdx > 0) clean = clean.Substring(0, metaIdx);
             int dashIdx = clean.IndexOf('-');
-            if (dashIdx > 0)
-                clean = clean.Substring(0, dashIdx);
+            if (dashIdx > 0) clean = clean.Substring(0, dashIdx);
 
             var parts = clean.Split('.', StringSplitOptions.RemoveEmptyEntries);
             int major = parts.Length > 0 && int.TryParse(parts[0], out int p0) ? p0 : 0;
@@ -203,36 +185,26 @@ namespace Housekeeping.Services
 
             string clean = versionStr.Trim().TrimStart('v', 'V');
             int plusIdx = clean.IndexOf('+');
-            if (plusIdx > 0)
-                clean = clean.Substring(0, plusIdx);
+            if (plusIdx > 0) clean = clean.Substring(0, plusIdx);
 
             int dashIdx = clean.IndexOf('-');
-            return dashIdx > 0 && dashIdx + 1 < clean.Length
-                ? clean.Substring(dashIdx + 1).Trim()
-                : "";
+            return dashIdx > 0 && dashIdx + 1 < clean.Length ? clean.Substring(dashIdx + 1).Trim() : "";
         }
 
-        /// <summary>
-        /// Compares two SemVer 2.0.0 strings including pre-release tags (e.g. 1.0.0-alpha.1 &lt; 1.0.0-beta.1 &lt; 1.0.0-rc.5 &lt; 1.0.0-rc.7 &lt; 1.0.0).
-        /// </summary>
         public static int CompareSemVer(string? aStr, string? bStr)
         {
             var va = ParseVersionSafe(aStr);
             var vb = ParseVersionSafe(bStr);
 
             int coreCmp = va.CompareTo(vb);
-            if (coreCmp != 0)
-                return coreCmp;
+            if (coreCmp != 0) return coreCmp;
 
             string preA = ExtractPreReleaseTag(aStr);
             string preB = ExtractPreReleaseTag(bStr);
 
-            if (string.IsNullOrEmpty(preA) && string.IsNullOrEmpty(preB))
-                return 0;
-            if (string.IsNullOrEmpty(preA))
-                return 1; // Final GA > Pre-release
-            if (string.IsNullOrEmpty(preB))
-                return -1; // Pre-release < Final GA
+            if (string.IsNullOrEmpty(preA) && string.IsNullOrEmpty(preB)) return 0;
+            if (string.IsNullOrEmpty(preA)) return 1;
+            if (string.IsNullOrEmpty(preB)) return -1;
 
             var partsA = preA.Split(new[] { '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
             var partsB = preB.Split(new[] { '.', '-' }, StringSplitOptions.RemoveEmptyEntries);
@@ -242,7 +214,6 @@ namespace Housekeeping.Services
             {
                 bool numA = long.TryParse(partsA[i], out long ia);
                 bool numB = long.TryParse(partsB[i], out long ib);
-
                 if (numA && numB)
                 {
                     int nCmp = ia.CompareTo(ib);
@@ -250,7 +221,6 @@ namespace Housekeeping.Services
                 }
                 else if (numA != numB)
                 {
-                    // Per SemVer 2.0.0 §11.4.1, numeric identifiers have lower precedence than non-numeric
                     return numA ? -1 : 1;
                 }
                 else
@@ -325,7 +295,8 @@ namespace Housekeeping.Services
                 {
                     try
                     {
-                        if (!Directory.Exists(targetDir))
+                        string remoteRoot = NormalizeRemoteRoot(targetDir);
+                        if (!Directory.Exists(targetDir) && !Directory.Exists(remoteRoot))
                         {
                             node.IsReachable = false;
                             node.DetectedVersion = "Unreachable";
@@ -336,45 +307,7 @@ namespace Housekeeping.Services
                         }
 
                         node.IsReachable = true;
-
-                        // Locate version.txt first (matching GetLocalAppVersion priority), then fallback to DLL/EXE FileVersion
-                        string versionFile = Path.Combine(targetDir, "version.txt");
-                        string remoteDll = Path.Combine(targetDir, "Housekeeping.dll");
-                        string remoteExe = Path.Combine(targetDir, "Housekeeping.exe");
-
-                        string detectedVer = "Unknown";
-
-                        if (File.Exists(versionFile))
-                        {
-                            try
-                            {
-                                string vText = File.ReadAllText(versionFile).Trim();
-                                if (!string.IsNullOrWhiteSpace(vText))
-                                    detectedVer = vText;
-                            }
-                            catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx2.Message}"); }
-                        }
-
-                        if (detectedVer == "Unknown" && File.Exists(remoteDll))
-                        {
-                            try
-                            {
-                                var fvi = FileVersionInfo.GetVersionInfo(remoteDll);
-                                detectedVer = fvi.FileVersion ?? fvi.ProductVersion ?? "Unknown";
-                            }
-                            catch (System.Exception __suppressedEx3) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx3.Message}"); }
-                        }
-                        else if (detectedVer == "Unknown" && File.Exists(remoteExe))
-                        {
-                            try
-                            {
-                                var fvi = FileVersionInfo.GetVersionInfo(remoteExe);
-                                detectedVer = fvi.FileVersion ?? fvi.ProductVersion ?? "Unknown";
-                            }
-                            catch (System.Exception __suppressedEx4) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx4.Message}"); }
-                        }
-
-                        node.DetectedVersion = detectedVer;
+                        node.DetectedVersion = DetectRemoteAppVersionFromDisk(targetDir);
                         EvaluateVersionEligibility(node);
                         return true;
                     }
@@ -406,7 +339,8 @@ namespace Housekeeping.Services
         public async Task<bool> UpdateRemoteAppBinariesAsync(
             RemoteNodeConfig node,
             Action<string, string> log,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            string? localSourceDirOverride = null)
         {
             if (node == null || string.IsNullOrWhiteSpace(node.RemoteAppPath))
             {
@@ -418,42 +352,35 @@ namespace Housekeeping.Services
             {
                 try
                 {
-                    string localDir = AppDomain.CurrentDomain.BaseDirectory;
-                    string remoteDir = node.RemoteAppPath;
+                    string localDir = string.IsNullOrWhiteSpace(localSourceDirOverride)
+                        ? AppDomain.CurrentDomain.BaseDirectory
+                        : localSourceDirOverride;
+                    string remoteRoot = NormalizeRemoteRoot(node.RemoteAppPath);
+                    string remoteBinaryDir = ResolveRemoteBinaryDir(node.RemoteAppPath);
 
-                    log("HEADER", $"=== Deploying Housekeeping Update to Node: {node.Name} ({remoteDir}) ===");
+                    log("HEADER", $"=== Deploying Housekeeping Update to Node: {node.Name} ({remoteBinaryDir}) ===");
+                    Directory.CreateDirectory(remoteRoot);
+                    Directory.CreateDirectory(remoteBinaryDir);
 
-                    if (!Directory.Exists(remoteDir))
-                    {
-                        log("INFO", $"Creating remote target directory: '{remoteDir}'...");
-                        Directory.CreateDirectory(remoteDir);
-                    }
-
-                    // Discover deployable files, strictly excluding settings.json, logs, history, and user data
                     var sourceDir = new DirectoryInfo(localDir);
                     var filesToDeploy = sourceDir.GetFiles("*", SearchOption.AllDirectories)
-                        .Where(f => !f.Name.Equals("settings.json", StringComparison.OrdinalIgnoreCase) &&
-                                    !f.Name.Equals("history.json", StringComparison.OrdinalIgnoreCase) &&
-                                    !f.FullName.Contains(@"\logs\", StringComparison.OrdinalIgnoreCase) &&
-                                    !f.FullName.Contains(@"\dats\", StringComparison.OrdinalIgnoreCase) &&
-                                    !f.FullName.Contains(@"\.git\", StringComparison.OrdinalIgnoreCase))
+                        .Where(f =>
+                        {
+                            string rel = Path.GetRelativePath(localDir, f.FullName);
+                            return !ShouldExcludeFromRemoteBinarySync(rel, f.Name);
+                        })
                         .ToList();
 
                     int deployedCount = 0;
                     foreach (var srcFile in filesToDeploy)
                     {
                         ct.ThrowIfCancellationRequested();
-
                         string relative = Path.GetRelativePath(localDir, srcFile.FullName);
-                        string destPath = Path.Combine(remoteDir, relative);
-
+                        string destPath = Path.Combine(remoteBinaryDir, relative);
                         string? destParent = Path.GetDirectoryName(destPath);
-                        if (!string.IsNullOrEmpty(destParent) && !Directory.Exists(destParent))
-                        {
+                        if (!string.IsNullOrEmpty(destParent))
                             Directory.CreateDirectory(destParent);
-                        }
 
-                        // Copy with overwrite, handling locked files via temp rename if needed
                         try
                         {
                             File.Copy(srcFile.FullName, destPath, overwrite: true);
@@ -461,7 +388,6 @@ namespace Housekeeping.Services
                         }
                         catch (IOException)
                         {
-                            // If file is locked, try renaming existing to .old and re-copy
                             try
                             {
                                 string oldPath = destPath + ".old";
@@ -477,21 +403,30 @@ namespace Housekeeping.Services
                         }
                     }
 
-                    // Write version.txt marker on remote
+                    // If local host runs inside Clean Release Root (...\app\), also sync outer root launcher/manifest/AGENTS.md
+                    string trimmedLocal = localDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    if (string.Equals(Path.GetFileName(trimmedLocal), "app", StringComparison.OrdinalIgnoreCase) &&
+                        Directory.GetParent(trimmedLocal) is { Exists: true } localRoot &&
+                        !string.Equals(remoteRoot, remoteBinaryDir, StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (string rootItem in new[] { "Housekeeping.exe", "mother.manifest.json", "AGENTS.md" })
+                        {
+                            string srcRootFile = Path.Combine(localRoot.FullName, rootItem);
+                            if (!File.Exists(srcRootFile)) continue;
+                            try
+                            {
+                                File.Copy(srcRootFile, Path.Combine(remoteRoot, rootItem), overwrite: true);
+                                deployedCount++;
+                            }
+                            catch (Exception exRoot) { Debug.WriteLine($"[RemoteNodeDeploymentService] Root file copy skipped ({rootItem}): {exRoot.Message}"); }
+                        }
+                    }
+
                     string localVer = GetLocalAppVersion();
-                    try
-                    {
-                        File.WriteAllText(Path.Combine(remoteDir, "version.txt"), localVer);
-                    }
-                    catch (System.Exception __suppressedEx5) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx5.Message}"); }
+                    try { ConfigService.AtomicWriteAllText(Path.Combine(remoteBinaryDir, "version.txt"), localVer); }
+                    catch (Exception exVer) { Debug.WriteLine($"[RemoteNodeDeploymentService] Remote version.txt write skipped: {exVer.Message}"); }
 
-                    try
-                    {
-                        File.WriteAllText(Path.Combine(remoteDir, "restart_request.signal"), $"Restart after update to v{localVer} at {DateTime.UtcNow:o}");
-                        log("INFO", $"Dispatched auto-restart signal to '{node.Name}'.");
-                    }
-                    catch (System.Exception __suppressedEx6) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx6.Message}"); }
-
+                    SendRemoteRestartSignal(node, log);
                     log("SUCCESS", $"Remote Node '{node.Name}' updated successfully! Deployed {deployedCount} file(s) to v{localVer}.");
                     return true;
                 }
@@ -519,61 +454,55 @@ namespace Housekeeping.Services
             {
                 try
                 {
-                    string remoteDir = node.RemoteAppPath;
-                    string remoteSettingsPath = Path.Combine(remoteDir, "settings.json");
+                    string existingSettingsPath = ResolveRemoteSettingsReadPath(node.RemoteAppPath);
+                    string targetSettingsPath = ResolveRemoteSettingsWritePath(node.RemoteAppPath);
+                    string remoteBackupsDir = ResolveRemoteBackupsDir(node.RemoteAppPath);
 
-                    log("HEADER", $"=== Syncing Settings to Remote Node: {node.Name} ===");
-
-                    if (!Directory.Exists(remoteDir))
-                    {
-                        Directory.CreateDirectory(remoteDir);
-                    }
+                    log("HEADER", $"=== Syncing Settings to Remote Node: {node.Name} ({targetSettingsPath}) ===");
+                    string? settingsParent = Path.GetDirectoryName(targetSettingsPath);
+                    if (!string.IsNullOrWhiteSpace(settingsParent))
+                        Directory.CreateDirectory(settingsParent);
 
                     var jsonOptions = new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true };
                     var payloadToWrite = localConfig.DeepClone();
 
-                    // Create backup of existing remote settings.json and preserve remote host's WebServer identity & RemoteNodes list
-                    if (File.Exists(remoteSettingsPath))
+                    if (File.Exists(existingSettingsPath))
                     {
+                        Directory.CreateDirectory(remoteBackupsDir);
                         string bakName = $"settings.json.bak_remote_{DateTime.Now:yyyyMMdd_HHmmss}";
-                        string bakPath = Path.Combine(remoteDir, bakName);
+                        string bakPath = Path.Combine(remoteBackupsDir, bakName);
                         try
                         {
-                            File.Copy(remoteSettingsPath, bakPath, overwrite: true);
-                            log("INFO", $"Created remote backup: {bakName}");
+                            File.Copy(existingSettingsPath, bakPath, overwrite: true);
+                            log("INFO", $"Created remote backup in backups\\: {bakName}");
                         }
-                        catch (System.Exception __suppressedEx7) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx7.Message}"); }
+                        catch (Exception exBak) { Debug.WriteLine($"[RemoteNodeDeploymentService] Remote backup skipped: {exBak.Message}"); }
 
                         try
                         {
-                            string existingRemoteJson = ConfigService.ReadAllTextWithRetry(remoteSettingsPath);
+                            string existingRemoteJson = ConfigService.ReadAllTextWithRetry(existingSettingsPath);
                             var existingRemoteCfg = JsonSerializer.Deserialize<AppConfig>(existingRemoteJson, jsonOptions);
                             if (existingRemoteCfg != null)
                             {
                                 if (existingRemoteCfg.WebServer != null)
-                                {
                                     payloadToWrite.WebServer = existingRemoteCfg.WebServer;
-                                }
                                 if (existingRemoteCfg.RemoteNodes != null && existingRemoteCfg.RemoteNodes.Count > 0)
-                                {
                                     payloadToWrite.RemoteNodes = existingRemoteCfg.RemoteNodes;
-                                }
                             }
                         }
-                        catch (System.Exception __suppressedEx8) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx8.Message}"); }
+                        catch (Exception exRead) { Debug.WriteLine($"[RemoteNodeDeploymentService] Existing remote settings read skipped: {exRead.Message}"); }
                     }
                     else
                     {
-                        // Never copy local host's admin password hash or NodeApiToken onto a brand-new remote node
                         payloadToWrite.WebServer.AdminPasswordHash = "";
                         payloadToWrite.WebServer.AdminPasswordSalt = "";
                         payloadToWrite.WebServer.NodeApiToken = "";
                         payloadToWrite.WebServer.EnsureNodeApiTokenInitialized();
                     }
 
-                    // Serialize settings and write atomically to remote
-                    string json = JsonSerializer.Serialize(payloadToWrite, jsonOptions);
-                    ConfigService.AtomicWriteAllText(remoteSettingsPath, json);
+                    payloadToWrite.PrepareForSave();
+                    string json = JsonSerializer.Serialize(payloadToWrite, ConfigService.JsonOptions);
+                    ConfigService.AtomicWriteAllText(targetSettingsPath, json);
 
                     log("SUCCESS", $"Settings synchronized to remote node '{node.Name}' successfully.");
                     return true;
@@ -584,64 +513,6 @@ namespace Housekeeping.Services
                     return false;
                 }
             }, ct);
-        }
-
-        public static bool SendRemoteRestartSignal(RemoteNodeConfig node, Action<string, string> log)
-        {
-            try
-            {
-                if (node == null || string.IsNullOrWhiteSpace(node.RemoteAppPath)) return false;
-                string signalPath = Path.Combine(node.RemoteAppPath, "restart_request.signal");
-                File.WriteAllText(signalPath, $"Manual restart requested at {DateTime.UtcNow:o}");
-                log("INFO", $"Dispatched restart signal to '{node.Name}'. The remote app will restart automatically.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                log("ERROR", $"Failed to send restart signal to '{node?.Name}': {ex.Message}");
-                return false;
-            }
-        }
-
-        public static bool SendRemoteControlCommand(RemoteNodeConfig node, RemoteControlRequest req, Action<string, string> log)
-        {
-            try
-            {
-                if (node == null || string.IsNullOrWhiteSpace(node.RemoteAppPath)) return false;
-                string signalPath = Path.Combine(node.RemoteAppPath, "control_request.json");
-                string json = JsonSerializer.Serialize(req, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(signalPath, json);
-                log("INFO", $"Dispatched '{req.Action}' command to remote node '{node.Name}' (TargetQueue: {req.TargetQueueName ?? req.TargetQueueId ?? "Active"}, TargetJob: {req.TargetJobName ?? req.TargetJobId ?? "None"}).");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                log("ERROR", $"Failed to send '{req.Action}' command to '{node?.Name}': {ex.Message}");
-                return false;
-            }
-        }
-
-        public static (List<NamedJobQueue> Queues, List<HousekeepingJob> Jobs) ReadRemoteQueuesAndJobs(RemoteNodeConfig node)
-        {
-            try
-            {
-                if (node == null || string.IsNullOrWhiteSpace(node.RemoteAppPath))
-                    return (new List<NamedJobQueue>(), new List<HousekeepingJob>());
-
-                string settingsPath = Path.Combine(node.RemoteAppPath, "settings.json");
-                if (File.Exists(settingsPath))
-                {
-                    string json = ConfigService.ReadAllTextWithRetry(settingsPath);
-                    var cfg = JsonSerializer.Deserialize<AppConfig>(json, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    if (cfg != null)
-                    {
-                        cfg.EnsureNamedQueuesInitialized();
-                        return (cfg.NamedQueues ?? new(), cfg.DefinedJobs ?? new());
-                    }
-                }
-            }
-            catch (System.Exception __suppressedEx9) { System.Diagnostics.Debug.WriteLine($"[RemoteNodeDeploymentService] Non-fatal error ignored: {__suppressedEx9.Message}"); }
-            return (new List<NamedJobQueue>(), new List<HousekeepingJob>());
         }
     }
 }

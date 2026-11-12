@@ -9,8 +9,10 @@ using Housekeeping.Models;
 
 namespace Housekeeping.Services.Modules
 {
-    public static class RomLauncherGeneratorModule
+    public static partial class RomLauncherGeneratorModule
     {
+        private const string SevenZipSidecarAndTransientExcludes =
+            "-xr!*.hash -xr!*.partial* -xr!*.redroom-part -xr!*.hklock -xr!.archive_hashes.json -xr!.coexistence.json";
         private static readonly string[] ArchiveExtensions = { ".7z", ".zip", ".rar" };
 
         private static readonly Regex MultiDiscRegex = new(
@@ -103,6 +105,17 @@ namespace Housekeeping.Services.Modules
                     continue;
                 }
 
+                if (NetworkSafetyService.HasActiveDirectoryOrParentLock(col.ArchivesPath, out var activeSentinel, scanImmediateSubdirectories: true))
+                {
+                    ctx.Log("WARN", $"[Coexistence] Deferring {col.ConsoleName} ('{col.ArchivesPath}') — active '{activeSentinel?.Operation}' lock held by {activeSentinel?.AppId} (PID {activeSentinel?.Pid}).");
+                    ctx.Stats.Skipped++;
+                    continue;
+                }
+
+                using var romLock = (!ctx.IsDryRun && cfg.AutoCompressUnarchivedRomsWith7z)
+                    ? NetworkSafetyService.AcquireDirectorySentinelLock(col.ArchivesPath, "rom_launcher_sync")
+                    : null;
+
                 string[] extensionsByPriority = BuildExtensionsPriorityList(col.ExtensionsCsv, cfg.AutoGenerateM3uForMultiDisc);
 
                 // Step 1: Auto-generate .m3u playlists for loose multi-disc games if enabled
@@ -120,54 +133,7 @@ namespace Housekeeping.Services.Modules
                 // Step 2.5: Audit existing launcher scripts & shortcuts to verify game files still exist
                 CleanupOrphanedLaunchersAndShortcuts(ctx, cfg, new List<ConsoleCollectionRule> { col });
 
-                // Step 2.6: Create and maintain collection verification manifest (.csv), Redump/No-Intro auditing & Archive Compliance Reports
-                var complianceStore = new ComplianceReportService(Path.Combine(ctx.ConfigService.DataDirectory, "compliance_reports.json"));
-                if (cfg.EnableCollectionManifestCsv)
-                {
-                    try
-                    {
-                        string datDir = string.IsNullOrWhiteSpace(cfg.DatFilesDirectory) ? Path.Combine(ctx.ConfigService.DataDirectory, "dats") : cfg.DatFilesDirectory;
-                        if (cfg.AutoDownloadMissingDats)
-                        {
-                            var datDownloader = new DatDownloadService();
-                            await datDownloader.EnsureDatFilesForConsoleAsync(datDir, col.ConsoleName, (lvl, msg) => ctx.Log(lvl, msg), ct);
-                        }
-
-                        var datIndex = NoIntroRedumpDatParser.LoadIndexForConsole(datDir, col.ConsoleName);
-                        await RomManifestCsvService.GenerateOrUpdateManifestAsync(
-                            col.ArchivesPath,
-                            col.ConsoleName,
-                            cfg,
-                            datIndex,
-                            (lvl, msg) => ctx.Log(lvl, msg),
-                            ct,
-                            consoleRule: col,
-                            reportStore: complianceStore);
-                    }
-                    catch (Exception ex)
-                    {
-                        ctx.Log("WARN", $"ROM Manifest Generation warning for {col.ConsoleName}: {ex.Message}");
-                    }
-                }
-                else if (cfg.EnableArchiveTemplateComplianceScan && !ctx.IsDryRun)
-                {
-                    try
-                    {
-                        await ArchiveComplianceService.ScanConsoleCollectionAsync(
-                            col,
-                            cfg,
-                            sevenZipExe,
-                            complianceStore,
-                            msg => ctx.Log("INFO", msg),
-                            ct);
-                    }
-                    catch (Exception ex)
-                    {
-                        ctx.Log("WARN", $"Archive Compliance Scan warning for {col.ConsoleName}: {ex.Message}");
-                    }
-                }
-
-                // Step 3: Scan archives
+                // Step 3: Scan archives (DAT/manifest/sidecar auditing decoupled to Module 8 / ShadowLibrary in v0.1.12)
                 var archiveDir = new DirectoryInfo(col.ArchivesPath);
                 List<FileInfo> archives;
                 try
@@ -175,7 +141,7 @@ namespace Housekeeping.Services.Modules
                     archives = archiveDir
                         .EnumerateFiles("*", SearchOption.AllDirectories)
                         .Where(f => ArchiveExtensions.Contains(f.Extension, StringComparer.OrdinalIgnoreCase) &&
-                                    !f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase) &&
+                                    !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name) &&
                                     f.Length > 0)
                         .ToList();
                 }
@@ -400,7 +366,8 @@ namespace Housekeeping.Services.Modules
             CancellationToken ct)
         {
             var allFiles = gameFolder.GetFiles("*", SearchOption.AllDirectories)
-                .Where(f => !f.Extension.Equals(".hash", StringComparison.OrdinalIgnoreCase))
+                .Where(f => !f.Extension.Equals(".hash", StringComparison.OrdinalIgnoreCase) &&
+                            !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name))
                 .ToArray();
             bool hasRomInside = extensionsByPriority.Any(ext =>
                 allFiles.Any(f => f.Name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)));
@@ -435,7 +402,7 @@ namespace Housekeeping.Services.Modules
                 ? $"\"{gameFolder.Name}\""
                 : $"\"{Path.Combine(gameFolder.FullName, "*")}\"";
 
-            string cmd = $"\"{sevenZipExe}\" a \"{working7z}\" {sourceArg} -xr!*.hash -y";
+            string cmd = $"\"{sevenZipExe}\" a \"{working7z}\" {sourceArg} {SevenZipSidecarAndTransientExcludes} -y";
             var res = await ctx.ProcessRunner.RunCommandAsync(
                 cmd,
                 useExternalCmdWindow: ctx.ResolveUseExternalCmd(cfg),
@@ -486,7 +453,7 @@ namespace Housekeeping.Services.Modules
                 .Where(f => !ArchiveExtensions.Contains(f.Extension, StringComparer.OrdinalIgnoreCase) &&
                             !f.Extension.Equals(".bat", StringComparison.OrdinalIgnoreCase) &&
                             !f.Extension.Equals(".url", StringComparison.OrdinalIgnoreCase) &&
-                            !f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase) &&
+                            !NetworkSafetyService.IsPartialOrTransientArtifact(f.Name) &&
                             extensionsByPriority.Any(ext => f.Name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)))
                 .OrderBy(f =>
                 {
@@ -556,7 +523,7 @@ namespace Housekeeping.Services.Modules
                         }
                     }
 
-                    cmd = $"\"{sevenZipExe}\" a \"{working7z}\" \"{archiveTitle}\" -xr!*.hash -y";
+                    cmd = $"\"{sevenZipExe}\" a \"{working7z}\" \"{archiveTitle}\" {SevenZipSidecarAndTransientExcludes} -y";
                     if (cfg.DeleteUncompressedOriginalsAfter7z || createdTempFolder)
                     {
                         tempSubdirToDelete = gameSubfolder;
@@ -565,7 +532,7 @@ namespace Housekeeping.Services.Modules
                 else
                 {
                     // Single file game: pack directly at root
-                    cmd = $"\"{sevenZipExe}\" a \"{working7z}\" \"{filesToBundle[0].Name}\" -xr!*.hash -y";
+                    cmd = $"\"{sevenZipExe}\" a \"{working7z}\" \"{filesToBundle[0].Name}\" {SevenZipSidecarAndTransientExcludes} -y";
                 }
 
                 ctx.Log("WORK", $"Compressing '{file.Name}' ({filesToBundle.Count} file(s)) -> {Path.GetFileName(final7z)}");
@@ -622,7 +589,7 @@ namespace Housekeeping.Services.Modules
                 if (ArchiveExtensions.Contains(f.Extension, StringComparer.OrdinalIgnoreCase)) return;
                 if (f.Extension.Equals(".bat", StringComparison.OrdinalIgnoreCase) ||
                     f.Extension.Equals(".url", StringComparison.OrdinalIgnoreCase)) return;
-                if (f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase)) return;
+                if (NetworkSafetyService.IsPartialOrTransientArtifact(f.Name)) return;
 
                 if (seen.Add(f.FullName))
                     result.Add(f);
@@ -932,290 +899,6 @@ namespace Housekeeping.Services.Modules
             catch (System.Exception __suppressedEx11) { System.Diagnostics.Debug.WriteLine($"[RomLauncherGeneratorModule] Non-fatal error ignored: {__suppressedEx11.Message}"); }
 
             return (foundPath, autoM3uDiscs);
-        }
-
-        private static void CreateLauncherFiles(
-            ModuleExecutionContext ctx,
-            RomLauncherGeneratorConfig cfg,
-            string sevenZipExe,
-            FileInfo archive,
-            string archiveBaseName,
-            string tempGamePath,
-            List<string> autoM3uRelativeDiscs,
-            ConsoleCollectionRule col)
-        {
-            string targetScratchDir = Path.Combine(cfg.TempExtractionScratchPath, col.SubFolder);
-            string launchCmd = BuildEmulatorLaunchCommand(col, tempGamePath);
-
-            var lines = new List<string>();
-            string rcloneExe = ctx.Dependencies.ResolveRclone();
-            var (preSyncCmds, postSyncCmds) = cfg.ResolveAllSyncCommands(rcloneExe, col);
-
-            if (cfg.EnablePrePostLaunchSyncCommands && preSyncCmds.Count > 0)
-            {
-                foreach (var cmd in preSyncCmds)
-                    lines.Add(cmd);
-            }
-
-            if (cfg.ExtractArchiveOnLaunch)
-            {
-                lines.Add($"\"{sevenZipExe}\" x \"{archive.FullName}\" -y -o\"{targetScratchDir}\"");
-
-                if (autoM3uRelativeDiscs.Count >= 2)
-                {
-                    string m3uFile = tempGamePath;
-                    string? discFolder = Path.GetDirectoryName(autoM3uRelativeDiscs[0]);
-                    for (int i = 0; i < autoM3uRelativeDiscs.Count; i++)
-                    {
-                        string op = i == 0 ? ">" : ">>";
-                        string discEntry = !string.IsNullOrWhiteSpace(discFolder)
-                            ? Path.GetFileName(autoM3uRelativeDiscs[i])
-                            : autoM3uRelativeDiscs[i];
-                        lines.Add($"echo {discEntry}{op}\"{m3uFile}\"");
-                    }
-                }
-            }
-
-            lines.Add(launchCmd);
-
-            if (cfg.ExtractArchiveOnLaunch)
-            {
-                lines.Add($"rmdir \"{cfg.TempExtractionScratchPath}\" /q /s");
-            }
-
-            if (cfg.EnablePrePostLaunchSyncCommands && postSyncCmds.Count > 0)
-            {
-                foreach (var cmd in postSyncCmds)
-                    lines.Add(cmd);
-            }
-
-            string batBaseName = $"{archiveBaseName} - {col.ConsoleName}";
-            string? primaryBatFullPath = null;
-
-            if (!string.IsNullOrWhiteSpace(cfg.LaunchersOutputRootPath))
-            {
-                string consoleLauncherDir = Path.Combine(cfg.LaunchersOutputRootPath, col.ConsoleName);
-                Directory.CreateDirectory(consoleLauncherDir);
-                primaryBatFullPath = Path.Combine(consoleLauncherDir, batBaseName + ".bat");
-                File.WriteAllLines(primaryBatFullPath, lines);
-                ctx.Log("SUCCESS", $"Created launcher: {primaryBatFullPath}");
-            }
-
-            if (cfg.CreateLocalLauncherNextToArchive && archive.DirectoryName != null)
-            {
-                string localBatPath = Path.Combine(archive.DirectoryName, $"{archiveBaseName} - Launcher.bat");
-                File.WriteAllLines(localBatPath, lines);
-                primaryBatFullPath ??= localBatPath;
-                ctx.Log("SUCCESS", $"Created local launcher: {localBatPath}");
-            }
-
-            if (cfg.CreateStartMenuShortcuts && !string.IsNullOrWhiteSpace(cfg.StartMenuShortcutsPath) && primaryBatFullPath != null)
-            {
-                try
-                {
-                    string shortcutDir = Path.Combine(cfg.StartMenuShortcutsPath, col.ConsoleName);
-                    Directory.CreateDirectory(shortcutDir);
-
-                    string urlPath = Path.Combine(shortcutDir, batBaseName + ".url");
-                    string appExe = Environment.ProcessPath ?? System.Reflection.Assembly.GetExecutingAssembly().Location;
-                    string iconPath = appExe.Replace('\\', '/');
-
-                    File.WriteAllLines(urlPath, new[]
-                    {
-                        "[InternetShortcut]",
-                        "URL=file:///" + primaryBatFullPath,
-                        "IconIndex=0",
-                        "IconFile=" + iconPath
-                    });
-                }
-                catch (Exception ex)
-                {
-                    ctx.Log("WARN", $"Could not create Start Menu shortcut for '{batBaseName}': {ex.Message}");
-                }
-            }
-        }
-
-        public static int CleanupOrphanedLaunchersAndShortcuts(
-            ModuleExecutionContext ctx,
-            RomLauncherGeneratorConfig cfg,
-            List<ConsoleCollectionRule> collections)
-        {
-            int deleted = 0;
-
-            foreach (var col in collections)
-            {
-                if (string.IsNullOrWhiteSpace(col.ArchivesPath) || !Directory.Exists(col.ArchivesPath))
-                    continue;
-
-                // 1. Audit launchers in LaunchersOutputRootPath / ConsoleName
-                if (!string.IsNullOrWhiteSpace(cfg.LaunchersOutputRootPath))
-                {
-                    string consoleLauncherDir = Path.Combine(cfg.LaunchersOutputRootPath, col.ConsoleName);
-                    if (Directory.Exists(consoleLauncherDir))
-                    {
-                        var batFiles = Directory.GetFiles(consoleLauncherDir, "*.bat", SearchOption.TopDirectoryOnly);
-                        foreach (var bat in batFiles)
-                        {
-                            bool isOrphan = false;
-                            try
-                            {
-                                string content = File.ReadAllText(bat);
-                                var match = BatExtractPathRegex.Match(content);
-                                if (match.Success)
-                                {
-                                    string archivePath = match.Groups["path"].Value;
-                                    if (!File.Exists(archivePath))
-                                    {
-                                        isOrphan = true;
-                                    }
-                                }
-                                else
-                                {
-                                    string batName = Path.GetFileNameWithoutExtension(bat);
-                                    string suffix = $" - {col.ConsoleName}";
-                                    string baseName = batName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase)
-                                        ? batName.Substring(0, batName.Length - suffix.Length)
-                                        : batName;
-
-                                    bool existsInCol = ArchiveExtensions.Any(ext =>
-                                        File.Exists(Path.Combine(col.ArchivesPath, baseName + ext)));
-
-                                    if (!existsInCol)
-                                    {
-                                        isOrphan = true;
-                                    }
-                                }
-                            }
-                            catch
-                            {
-                                isOrphan = false;
-                            }
-
-                            if (isOrphan)
-                            {
-                                try
-                                {
-                                    File.Delete(bat);
-                                    deleted++;
-                                    ctx.Log("WARN", $"[Garbage Collection] Removed outdated launcher (ROM missing/renamed): {Path.GetFileName(bat)}");
-
-                                    if (!string.IsNullOrWhiteSpace(cfg.StartMenuShortcutsPath))
-                                    {
-                                        string urlPath = Path.Combine(cfg.StartMenuShortcutsPath, col.ConsoleName, Path.GetFileNameWithoutExtension(bat) + ".url");
-                                        if (File.Exists(urlPath))
-                                        {
-                                            File.Delete(urlPath);
-                                            deleted++;
-                                            ctx.Log("WARN", $"[Garbage Collection] Removed outdated Start Menu shortcut: {Path.GetFileName(urlPath)}");
-                                        }
-                                    }
-                                }
-                                catch (Exception ex)
-                                {
-                                    ctx.Log("WARN", $"Could not delete outdated launcher '{bat}': {ex.Message}");
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 2. Audit Start Menu shortcuts for this console
-                if (!string.IsNullOrWhiteSpace(cfg.StartMenuShortcutsPath))
-                {
-                    string shortcutDir = Path.Combine(cfg.StartMenuShortcutsPath, col.ConsoleName);
-                    if (Directory.Exists(shortcutDir))
-                    {
-                        var urls = Directory.GetFiles(shortcutDir, "*.url", SearchOption.TopDirectoryOnly);
-                        foreach (var url in urls)
-                        {
-                            bool isDead = false;
-                            try
-                            {
-                                string text = File.ReadAllText(url);
-                                var m = UrlShortcutTargetRegex.Match(text);
-                                if (m.Success)
-                                {
-                                    string target = m.Groups["target"].Value.Trim().Replace('/', '\\');
-                                    if (!File.Exists(target))
-                                    {
-                                        isDead = true;
-                                    }
-                                }
-                            }
-                            catch (System.Exception __suppressedEx12) { System.Diagnostics.Debug.WriteLine($"[RomLauncherGeneratorModule] Non-fatal error ignored: {__suppressedEx12.Message}"); }
-
-                            if (isDead)
-                            {
-                                try
-                                {
-                                    File.Delete(url);
-                                    deleted++;
-                                    ctx.Log("WARN", $"[Garbage Collection] Removed dead Start Menu shortcut: {Path.GetFileName(url)}");
-                                }
-                                catch (System.Exception __suppressedEx13) { System.Diagnostics.Debug.WriteLine($"[RomLauncherGeneratorModule] Non-fatal error ignored: {__suppressedEx13.Message}"); }
-                            }
-                        }
-                    }
-                }
-
-                // 3. Audit local launchers next to archives if enabled
-                if (cfg.CreateLocalLauncherNextToArchive && Directory.Exists(col.ArchivesPath))
-                {
-                    try
-                    {
-                        var localBats = Directory.GetFiles(col.ArchivesPath, "* - Launcher.bat", SearchOption.AllDirectories);
-                        foreach (var lbat in localBats)
-                        {
-                            string dir = Path.GetDirectoryName(lbat) ?? "";
-                            string batName = Path.GetFileName(lbat);
-                            string baseName = batName.Substring(0, batName.Length - " - Launcher.bat".Length);
-
-                            bool hasArchive = ArchiveExtensions.Any(ext => File.Exists(Path.Combine(dir, baseName + ext)));
-                            if (!hasArchive)
-                            {
-                                File.Delete(lbat);
-                                deleted++;
-                                ctx.Log("WARN", $"[Garbage Collection] Removed outdated local launcher: {batName}");
-                            }
-                        }
-                    }
-                    catch (System.Exception __suppressedEx14) { System.Diagnostics.Debug.WriteLine($"[RomLauncherGeneratorModule] Non-fatal error ignored: {__suppressedEx14.Message}"); }
-                }
-            }
-
-            return deleted;
-        }
-
-        public static string BuildEmulatorLaunchCommand(ConsoleCollectionRule col, string romPath)
-        {
-            string emu = string.IsNullOrWhiteSpace(col.EmulatorExecutablePath) ? "retroarch.exe" : col.EmulatorExecutablePath.Trim();
-            string coreOrArgs = (col.CoreOrCustomArgs ?? "").Trim();
-            string romDir = Path.GetDirectoryName(romPath) ?? "";
-
-            return col.EmulatorRunnerType.Trim().ToLowerInvariant() switch
-            {
-                "retroarch" => $"start /w \"\" \"{emu}\" -f -L \"{coreOrArgs}\" \"{romPath}\"",
-                "pcsx2" => $"start /w \"\" \"{emu}\" -fullscreen -batch -- \"{romPath}\"",
-                "duckstation" => $"start /w \"\" \"{emu}\" -fullscreen -batch -- \"{romPath}\"",
-                "rpcs3" => $"\"{emu}\" --no-gui --fullscreen \"{romPath}\"",
-                "ppsspp" => $"start /w \"\" \"{emu}\" --fullscreen \"{romPath}\"",
-                "dolphin" => $"start /w \"\" \"{emu}\" -b -e \"{romPath}\"",
-                "flycast" => $"start /w \"\" \"{emu}\" \"{romPath}\"",
-                "redream" => $"start /w \"\" \"{emu}\" \"{romPath}\"",
-                "project64" or "rmg" => $"start /w \"\" \"{emu}\" \"{romPath}\"",
-                "melonds" or "desmume" => $"start /w \"\" \"{emu}\" -f \"{romPath}\"",
-                "citra" or "azahar" => $"start /w \"\" \"{emu}\" -f \"{romPath}\"",
-                "cemu" => $"start /w \"\" \"{emu}\" -f -g \"{romPath}\"",
-                "xemu" => $"start /w \"\" \"{emu}\" -full-screen -dvd_path \"{romPath}\"",
-                "xenia" => $"start /w \"\" \"{emu}\" --fullscreen \"{romPath}\"",
-                "custom" when !string.IsNullOrWhiteSpace(coreOrArgs) =>
-                    coreOrArgs
-                        .Replace("{emu}", $"\"{emu}\"", StringComparison.OrdinalIgnoreCase)
-                        .Replace("{core}", $"\"{coreOrArgs}\"", StringComparison.OrdinalIgnoreCase)
-                        .Replace("{rom}", $"\"{romPath}\"", StringComparison.OrdinalIgnoreCase)
-                        .Replace("{romDir}", $"\"{romDir}\"", StringComparison.OrdinalIgnoreCase),
-                _ => $"start /w \"\" \"{emu}\" \"{romPath}\""
-            };
         }
     }
 }

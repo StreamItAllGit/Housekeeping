@@ -29,7 +29,7 @@ namespace Housekeeping.Services
         public DateTime LastModifiedUtc { get; set; }
     }
 
-    public static class RomManifestCsvService
+    public static partial class RomManifestCsvService
     {
         private static readonly string[] CompressedContainerExtensions = { ".chd", ".rvz", ".ciso", ".cso", ".pbp" };
         private static readonly Regex SafeConsoleNameRegex = new(@"[^a-zA-Z0-9_\-]", RegexOptions.Compiled);
@@ -46,6 +46,14 @@ namespace Housekeeping.Services
         {
             if (!cfg.EnableCollectionManifestCsv || string.IsNullOrWhiteSpace(collectionDir) || !Directory.Exists(collectionDir))
                 return;
+
+            if (NetworkSafetyService.HasActiveDirectoryOrParentLock(collectionDir, "housekeeping", out string? activeOwner, out string? activeLockFile))
+            {
+                log("WARN", $"[Coexistence Defer] Skipping ROM manifest update in '{collectionDir}' — active sentinel lock '{activeLockFile}' held by '{activeOwner}'.");
+                return;
+            }
+
+            using var hkSentinel = NetworkSafetyService.AcquireDirectorySentinelLock(collectionDir, "rom-manifest-audit");
 
             string manifestFileName = string.IsNullOrWhiteSpace(cfg.ManifestCsvFileName) ? "collection_manifest.csv" : cfg.ManifestCsvFileName;
             string manifestFilePath = Path.Combine(collectionDir, manifestFileName);
@@ -335,8 +343,9 @@ namespace Housekeeping.Services
                                         await File.WriteAllTextAsync(HashSidecarService.GetStandardSidecarPath(arch.FullName), scContent, Encoding.UTF8, ct);
                                     }
                                 }
-                                catch
+                                catch (Exception scEx)
                                 {
+                                    System.Diagnostics.Debug.WriteLine($"[RomManifestCsvService] Cached sidecar backfill skipped: {scEx.Message}");
                                     if (cfg.DeepInspectAndHashInnerRoms)
                                         canUseCachedRow = false;
                                 }
@@ -504,6 +513,12 @@ namespace Housekeeping.Services
                                 ct: ct);
                         }
 
+                        if (!cfg.UseFastArchiveHeaderCrc32Audit)
+                        {
+                            TryBackfillHashesFromDat(payloadFiles, datIndex, baseTitle);
+                        }
+                        bool preserveRicherSidecar = ShouldPreserveExistingSidecar(arch.FullName, payloadFiles, out var preservedContainer);
+
                         var primaryFile = payloadFiles
                             .OrderByDescending(f => !ReleaseStructureDetector.IsDiscDescriptorFile(f.FileName))
                             .ThenByDescending(f => f.Size)
@@ -515,9 +530,12 @@ namespace Housekeeping.Services
                         item.VerifiedLocalHash = primaryFile.Sha1;
                         EvaluateMultiFileMatchStatus(item, payloadFiles, datIndex, Path.GetExtension(primaryFile.FileName));
 
-                        if (payloadFiles.All(f => !string.IsNullOrWhiteSpace(f.Sha1)))
+                        if (!preserveRicherSidecar && payloadFiles.All(f => !string.IsNullOrWhiteSpace(f.Sha1)))
                         {
-                            sidecarContentToPersist = HashSidecarService.GenerateSidecarContentForFiles(baseTitle, payloadFiles);
+                            var containerToPersist = preservedContainer
+                                ?? HashSidecarService.ReconstructContainerHashFromDocument(sidecarVerify?.ParsedDocument, arch.Name)
+                                ?? await HashSidecarService.ComputeFileHashesAsync(arch.FullName, ct);
+                            sidecarContentToPersist = HashSidecarService.GenerateSidecarContentForFiles(baseTitle, payloadFiles, containerToPersist);
                         }
                     }
 
@@ -540,7 +558,10 @@ namespace Housekeeping.Services
                     item.PayloadRomSize = outerResult.Size;
                     item.VerifiedLocalHash = outerResult.Sha1;
                     EvaluateMatchStatus(item, datIndex, arch.Extension);
-                    sidecarContentToPersist = HashSidecarService.GenerateSidecarContentForFiles(baseTitle, new[] { outerResult });
+                    if (!ShouldPreserveExistingSidecar(arch.FullName, new[] { outerResult }, out _))
+                    {
+                        sidecarContentToPersist = HashSidecarService.GenerateSidecarContentForFiles(baseTitle, new[] { outerResult }, outerResult);
+                    }
                     await ApplyComplianceAsync(item, arch.FullName, isDir: false, null);
                 }
 
@@ -568,11 +589,13 @@ namespace Housekeeping.Services
                     try
                     {
                         string standardSidecarPath = HashSidecarService.GetStandardSidecarPath(arch.FullName);
+                        bool writableArchive = HashSidecarService.IsWritableArchiveFilePath(arch.FullName);
+                        bool writeExternal = cfg.HashFilePlacement is HashSidecarMode.SidecarBeside or HashSidecarMode.SidecarAndArchive || !writableArchive;
+                        bool writeInternal = cfg.HashFilePlacement is HashSidecarMode.PackageInsideArchive or HashSidecarMode.SidecarAndArchive && writableArchive;
 
-                        if (cfg.HashFilePlacement == HashSidecarMode.SidecarBeside ||
-                            !HashSidecarService.IsWritableArchiveFilePath(arch.FullName))
+                        if (writeExternal)
                         {
-                            if (HashSidecarService.IsWritableArchiveFilePath(arch.FullName) &&
+                            if (!writeInternal && writableArchive &&
                                 sidecarVerify != null &&
                                 sidecarVerify.Status != SidecarVerificationStatus.Valid &&
                                 (sidecarVerify.Location == SidecarLocation.InternalArchive || sidecarVerify.Location == SidecarLocation.Both))
@@ -583,10 +606,13 @@ namespace Housekeeping.Services
                                 item.LastModifiedUtc = arch.LastWriteTimeUtc;
                             }
 
-                            await File.WriteAllTextAsync(standardSidecarPath, sidecarContentToPersist, Encoding.UTF8, ct);
+                            if (!(sidecarAlreadyVerified && File.Exists(standardSidecarPath)))
+                            {
+                                await File.WriteAllTextAsync(standardSidecarPath, sidecarContentToPersist, new UTF8Encoding(false), ct);
+                            }
                         }
-                        else if (cfg.HashFilePlacement == HashSidecarMode.PackageInsideArchive &&
-                                 HashSidecarService.IsWritableArchiveFilePath(arch.FullName))
+
+                        if (writeInternal)
                         {
                             bool alreadyValidInside = sidecarAlreadyVerified &&
                                 sidecarVerify != null &&
@@ -594,10 +620,10 @@ namespace Housekeeping.Services
 
                             if (alreadyValidInside)
                             {
-                                // Preserve archive timestamp; always remove any external sidecars outside the archive
-                                foreach (var extSidecar in HashSidecarService.GetExistingExternalSidecarPaths(arch.FullName))
+                                if (!writeExternal)
                                 {
-                                    try { File.Delete(extSidecar); } catch (System.Exception __suppressedEx5) { System.Diagnostics.Debug.WriteLine($"[RomManifestCsvService] Non-fatal error ignored: {__suppressedEx5.Message}"); }
+                                    foreach (var extSidecar in HashSidecarService.GetExistingExternalSidecarPaths(arch.FullName))
+                                        NetworkSafetyService.TryDeleteFile(extSidecar);
                                 }
                             }
                             else
@@ -606,7 +632,7 @@ namespace Housekeeping.Services
                                     (sidecarVerify != null &&
                                      (sidecarVerify.Location == SidecarLocation.InternalArchive || sidecarVerify.Location == SidecarLocation.Both)))
                                 {
-                                    await HashSidecarService.DeleteArchiveInternalHashFilesAsync(sevenZip, arch.FullName, ct);
+                                    await HashSidecarService.DeleteArchiveInternalHashFilesAsync(sevenZip, arch.FullName, ct, syncPostMutationContainerHashJson: false);
                                 }
 
                                 string tempDir = Path.Combine(Path.GetTempPath(), "hk_hash_" + Guid.NewGuid().ToString("N"));
@@ -614,13 +640,14 @@ namespace Housekeeping.Services
                                 string tempSidecar = Path.Combine(tempDir, $"{baseTitle}.hash");
                                 try
                                 {
-                                    await File.WriteAllTextAsync(tempSidecar, sidecarContentToPersist, Encoding.UTF8, ct);
+                                    await File.WriteAllTextAsync(tempSidecar, sidecarContentToPersist, new UTF8Encoding(false), ct);
                                     bool injected = await HashSidecarService.InjectSidecarIntoArchiveAsync(sevenZip, arch.FullName, tempSidecar, ct);
                                     if (injected)
                                     {
-                                        foreach (var extSidecar in HashSidecarService.GetExistingExternalSidecarPaths(arch.FullName))
+                                        if (!writeExternal)
                                         {
-                                            try { File.Delete(extSidecar); } catch (System.Exception __suppressedEx6) { System.Diagnostics.Debug.WriteLine($"[RomManifestCsvService] Non-fatal error ignored: {__suppressedEx6.Message}"); }
+                                            foreach (var extSidecar in HashSidecarService.GetExistingExternalSidecarPaths(arch.FullName))
+                                                NetworkSafetyService.TryDeleteFile(extSidecar);
                                         }
                                         arch.Refresh();
                                         item.FileSize = arch.Length;
@@ -1271,212 +1298,6 @@ namespace Housekeeping.Services
             item.ProperName = "N/A";
             item.MatchStatus = "NA";
             item.Notes = "Game title and hash not found in DAT database";
-        }
-
-        public static string GuessInnerRomNameFromArchive(FileInfo arch)
-        {
-            // For zip archives, quickly peek without extraction
-            if (arch.Extension.Equals(".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                try
-                {
-                    using var zip = System.IO.Compression.ZipFile.OpenRead(arch.FullName);
-                    var entry = zip.Entries.FirstOrDefault(e => !e.FullName.EndsWith("/") && !e.FullName.EndsWith("\\"));
-                    if (entry != null)
-                        return entry.Name;
-                }
-                catch (System.Exception __suppressedEx10) { System.Diagnostics.Debug.WriteLine($"[RomManifestCsvService] Non-fatal error ignored: {__suppressedEx10.Message}"); }
-            }
-
-            return Path.GetFileNameWithoutExtension(arch.Name);
-        }
-
-        public static async Task<string> ComputeFileSha1Async(string filePath, CancellationToken ct = default)
-        {
-            return await Task.Run(() =>
-            {
-                try
-                {
-                    using var sha1 = SHA1.Create();
-                    using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite, 262144, FileOptions.SequentialScan);
-                    byte[] hash = sha1.ComputeHash(stream);
-                    return Convert.ToHexString(hash);
-                }
-                catch
-                {
-                    return "ERROR";
-                }
-            }, ct);
-        }
-
-        public static Dictionary<string, RomManifestItem> LoadExistingManifest(string csvPath)
-        {
-            var cache = new Dictionary<string, RomManifestItem>(StringComparer.OrdinalIgnoreCase);
-            if (!File.Exists(csvPath))
-                return cache;
-
-            try
-            {
-                var lines = File.ReadAllLines(csvPath);
-                if (lines.Length <= 1) return cache;
-
-                var headerCols = ParseCsvLine(lines[0]);
-                bool hasCrcColumn = headerCols.Any(h => h.Contains("CRC32", StringComparison.OrdinalIgnoreCase));
-                bool hasComplianceColumn = headerCols.Any(h => h.Contains("Compliance", StringComparison.OrdinalIgnoreCase));
-
-                for (int i = 1; i < lines.Length; i++)
-                {
-                    string line = lines[i];
-                    if (string.IsNullOrWhiteSpace(line)) continue;
-
-                    var cols = ParseCsvLine(line);
-                    RomManifestItem? item = null;
-
-                    if (cols.Count >= 9 && (hasCrcColumn || hasComplianceColumn))
-                    {
-                        item = new RomManifestItem
-                        {
-                            GameTitle = cols[0],
-                            ProperName = cols[1],
-                            ArchiveFileName = cols[2],
-                            RomOrFolderName = cols[3],
-                            VerifiedLocalCrc32 = cols[4],
-                            VerifiedLocalHash = cols[5],
-                            MatchStatus = cols[6],
-                            ArchiveCompliance = string.IsNullOrWhiteSpace(cols[7]) ? "CLEAN" : cols[7],
-                            Notes = cols[8]
-                        };
-                    }
-                    else if (cols.Count >= 8 && hasCrcColumn && !hasComplianceColumn)
-                    {
-                        item = new RomManifestItem
-                        {
-                            GameTitle = cols[0],
-                            ProperName = cols[1],
-                            ArchiveFileName = cols[2],
-                            RomOrFolderName = cols[3],
-                            VerifiedLocalCrc32 = cols[4],
-                            VerifiedLocalHash = cols[5],
-                            MatchStatus = cols[6],
-                            ArchiveCompliance = "CLEAN",
-                            Notes = cols[7]
-                        };
-                    }
-                    else if (cols.Count >= 8 && !hasCrcColumn && hasComplianceColumn)
-                    {
-                        item = new RomManifestItem
-                        {
-                            GameTitle = cols[0],
-                            ProperName = cols[1],
-                            ArchiveFileName = cols[2],
-                            RomOrFolderName = cols[3],
-                            VerifiedLocalCrc32 = "",
-                            VerifiedLocalHash = cols[4],
-                            MatchStatus = cols[5],
-                            ArchiveCompliance = string.IsNullOrWhiteSpace(cols[6]) ? "CLEAN" : cols[6],
-                            Notes = cols[7]
-                        };
-                    }
-                    else if (cols.Count >= 7)
-                    {
-                        // Legacy 7-column manifest format
-                        item = new RomManifestItem
-                        {
-                            GameTitle = cols[0],
-                            ProperName = cols[1],
-                            ArchiveFileName = cols[2],
-                            RomOrFolderName = cols[3],
-                            VerifiedLocalCrc32 = "",
-                            VerifiedLocalHash = cols[4],
-                            MatchStatus = cols[5],
-                            ArchiveCompliance = "CLEAN",
-                            Notes = cols[6]
-                        };
-                    }
-
-                    if (item != null)
-                    {
-                        string key = item.ArchiveFileName != "N/A"
-                            ? item.ArchiveFileName
-                            : item.RomOrFolderName;
-
-                        if (!string.IsNullOrWhiteSpace(key))
-                        {
-                            cache[key] = item;
-                        }
-                    }
-                }
-            }
-            catch (System.Exception __suppressedEx11) { System.Diagnostics.Debug.WriteLine($"[RomManifestCsvService] Non-fatal error ignored: {__suppressedEx11.Message}"); }
-
-            return cache;
-        }
-
-        public static void WriteManifestToCsv(string csvPath, List<RomManifestItem> items)
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("Game Title,Proper Redump/No-Intro Name,Archive File Name,ROM / Folder Name,Verified Local CRC32,Verified Local Hash,Match Status,Archive Compliance,Notes");
-
-            foreach (var item in items.OrderBy(x => x.GameTitle, StringComparer.OrdinalIgnoreCase))
-            {
-                sb.AppendLine(string.Join(",",
-                    EscapeCsv(item.GameTitle),
-                    EscapeCsv(item.ProperName),
-                    EscapeCsv(item.ArchiveFileName),
-                    EscapeCsv(item.RomOrFolderName),
-                    EscapeCsv(item.VerifiedLocalCrc32),
-                    EscapeCsv(item.VerifiedLocalHash),
-                    EscapeCsv(item.MatchStatus),
-                    EscapeCsv(string.IsNullOrWhiteSpace(item.ArchiveCompliance) ? "CLEAN" : item.ArchiveCompliance),
-                    EscapeCsv(item.Notes)));
-            }
-
-            ConfigService.AtomicWriteAllText(csvPath, sb.ToString());
-        }
-
-        public static string EscapeCsv(string? field)
-        {
-            if (string.IsNullOrEmpty(field)) return "";
-            if (field.Contains(',') || field.Contains('"') || field.Contains('\n') || field.Contains('\r'))
-            {
-                return $"\"{field.Replace("\"", "\"\"")}\"";
-            }
-            return field;
-        }
-
-        public static List<string> ParseCsvLine(string line)
-        {
-            var result = new List<string>();
-            var cur = new StringBuilder();
-            bool inQuotes = false;
-
-            for (int i = 0; i < line.Length; i++)
-            {
-                char c = line[i];
-                if (c == '"')
-                {
-                    if (inQuotes && i + 1 < line.Length && line[i + 1] == '"')
-                    {
-                        cur.Append('"');
-                        i++;
-                    }
-                    else
-                    {
-                        inQuotes = !inQuotes;
-                    }
-                }
-                else if (c == ',' && !inQuotes)
-                {
-                    result.Add(cur.ToString());
-                    cur.Clear();
-                }
-                else
-                {
-                    cur.Append(c);
-                }
-            }
-            result.Add(cur.ToString());
-            return result;
         }
     }
 }

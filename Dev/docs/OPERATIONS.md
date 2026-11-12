@@ -1,26 +1,31 @@
 # Housekeeping — Operations, Deployment & Troubleshooting Runbook
 
 - **Document:** `OPERATIONS.md` (Technical Manual 3 of 4)
-- **Active Build Version:** `v1.0.0-rc.11-hf.2` (In-Dev Target: `v1.0.0-rc.12`)
+- **Active Build Version:** `v0.1.12` (In-Dev Target: `v0.1.13`)
 - **Canonical Production Root:** `D:\Programs\Housekeeping\`
 - **Development & Sandbox Roots:** `D:\Projects\Personal\Housekeeping\Dev\` & `D:\Projects\Personal\Housekeeping\Sandbox\`
-- **Default Ports:** HTTP / SignalR `:5178` (`:15178` in Sandbox) · Tailscale Serve HTTPS Proxy `:443` / `:8578` $\rightarrow$ `http://127.0.0.1:5178`
+- **Default Ports:** HTTP / SignalR `:5178` (`:15178` in Sandbox) · Tailscale Serve HTTPS Proxy `:443` / `:8478` $\rightarrow$ `http://127.0.0.1:5178`
 
 ---
 
 ## 1. Install Topology & Canonical Directories
 
-Per Dev Bible [Standard 01](file:///D:/Projects/Personal/_DevBible/01_PROJECT_LAYOUTS.md) and [Standard 12 §3.1](file:///D:/Projects/Personal/_DevBible/12_WORKSPACE_AND_DEPLOYMENT_CLEANLINESS.md), Housekeeping separates its outer 6-folder workspace (`D:\Projects\Personal\Housekeeping\`) from its clean deployed runtime layout (`D:\Programs\Housekeeping\` or `Builds\current\`):
+Per Dev Bible [Standard 01](file:///D:/Projects/Personal/_DevBible/01_PROJECT_LAYOUTS.md) and [Standard 12 §3.1](file:///D:/Projects/Personal/_DevBible/12_WORKSPACE_AND_DEPLOYMENT_CLEANLINESS.md), Housekeeping separates its outer 6-folder workspace (`D:\Projects\Personal\Housekeeping\`) from its clean deployed runtime layout (`D:\Programs\Housekeeping\` or `Builds\v0.1.12\`):
 
 ```text
 D:\Programs\Housekeeping\                     # Canonical Production Root (<InstallRoot>)
-├── Housekeeping.exe                          # Root Launcher Shim (Housekeeping.Launcher, 152 KB)
-├── mother.manifest.json                      # Mother v1.0 Fleet supervision manifest
-├── app\                                      # Compiled application binaries & wwwroot SPA
+├── Housekeeping.exe                          # Root Launcher Shim (Housekeeping.Launcher)
+├── AGENTS.md                                 # Compact zero-PII portable context anchor (<= 40 lines / < 2 KB)
+├── mother.manifest.json                      # Mother v1.0 Fleet supervision manifest (SchemaVersion 2)
+├── app\                                      # Compiled application binaries, wwwroot SPA & installer receipts
 │   ├── Housekeeping.exe                      # Primary WinForms Tray + WebView2 Host (Housekeeping.DesktopHost)
 │   ├── Housekeeping.Server.exe               # Headless Kestrel server executable
+│   ├── Housekeeping-Uninstall.exe            # Contained uninstaller binary
 │   ├── Housekeeping.Core.dll                 # Core domain, services & 8 pipeline modules
 │   ├── Housekeeping.Server.dll               # ASP.NET Core Minimal APIs & SignalR hub
+│   ├── suite.manifest.json                   # Standard 19 §3 companion suite manifest (v2)
+│   ├── .install_manifest.json                # Installed file inventory receipt
+│   ├── version.txt                           # Active deployed SemVer stamp (0.1.12)
 │   ├── wwwroot\                              # Compiled React 19 + Vite 6 SPA assets
 │   └── tools\                                # Optional bundled portable CLI tools
 ├── data\                                     # Canonical runtime state (<DataDir>, resolved by ConfigService)
@@ -28,28 +33,30 @@ D:\Programs\Housekeeping\                     # Canonical Production Root (<Inst
 │   ├── history.json                          # Pipeline execution history log
 │   ├── compliance_reports.json               # Archive compliance & .hash findings store
 │   ├── pending_swaps.json                    # Deferred .partial transcode swaps
-│   ├── interrupted_run_checkpoint.json       # Mid-shutdown recovery checkpoint (present only when interrupted)
+│   ├── interrupted_run_checkpoint.json       # Mid-shutdown recovery checkpoint (preserved on graceful shutdown)
 │   ├── .hk_cookie_secret.key                 # 32-byte hex HMAC-SHA256 session cookie signing key
 │   ├── dats\                                 # No-Intro & Redump .dat / .xml files
-│   ├── manifests\                            # Default output directory for collection_manifest.csv/.json/.html
+│   ├── manifests\                            # Default output directory for collection_manifest.csv/.tsv/.json/.html
 │   ├── tools\                                # User/auto-provisioned CLI binaries (HandBrakeCLI, 7z, rclone, hbd)
 │   └── webview2_cache\                       # DisposableWebViewForm Chromium user data folder
-├── backups\
-│   └── config_snapshots\                     # 20 most recent SHA-256 deduplicated settings.json snapshots + .7z backups
-├── logs\                                     # Canonical log root (<LogsDir>)
+├── backups\                                  # Sibling backup root (never inside data\ — prevents self-inclusion)
+│   ├── Housekeeping_Backup_*.zip / *.7z      # Clean JSON state-only backups (/api/v1/system/backup/now & backup-now.bat)
+│   └── config_snapshots\                     # 20 most recent SHA-256 deduplicated settings.json snapshots
+├── logs\                                     # Canonical log root (<LogsDir> / ActiveLogsDir)
 │   ├── Housekeeping_Live.log                 # Rolling live log (10 MB x 5 generations: .1.log .. .5.log)
 │   ├── telemetry_heartbeat.json              # 10s (active) / 30s (idle) JSON health heartbeat
+│   ├── Housekeeping_Doctor_*.json            # Sanitized System Doctor diagnostic bundles (contained in ActiveLogsDir)
 │   ├── runs\                                 # Per-run transcripts (Run_<Queue>_<yyyyMMdd_HHmmss>.log, 30-day retention)
-│   └── crashes\                              # Zero-PII JSON crash bundles (crash_<yyyyMMdd_HHmmss>_<id>.json, max 30)
+│   └── crashes\                              # Filtered zero-PII JSON crash bundles (crash_<yyyyMMdd_HHmmss>_<id>.json, max 30)
 └── scripts\                                  # Non-interactive & interactive operational batch utilities
-    ├── start.bat
-    ├── stop.bat
-    ├── restart.bat
+    ├── start-daemon.bat
+    ├── stop-daemon.bat
     ├── status-check.bat
-    ├── backup-data.bat
+    ├── backup-now.bat
     └── interactive\
-        ├── launch-ui.bat
-        └── repair-config.bat
+        ├── inspect-status.bat
+        ├── repair-config.bat
+        └── tail-logs.bat
 ```
 
 ---
@@ -57,26 +64,42 @@ D:\Programs\Housekeeping\                     # Canonical Production Root (<Inst
 ## 2. Executables, CLI Flags & Environment Variables
 
 ### 2.1 Runtime Executables (`Housekeeping.exe` / `app\Housekeeping.exe` / `app\Housekeeping.Server.exe`)
-Parsed by [`HousekeepingCliParser.Parse`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hosting/HousekeepingCliParser.cs#L43-L237) and [`DesktopHost\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.DesktopHost/Program.cs#L19-L66):
+Parsed by [`HousekeepingCliParser.Parse`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hosting/HousekeepingCliParser.cs#L1-L284), [`HousekeepingCliRunner`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hosting/HousekeepingCliRunner.cs#L1-L137), and [`DesktopHost\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.DesktopHost/Program.cs#L1-L232):
 
 | CLI Flag | Env Var Equivalent | Default | Behavior |
 | :--- | :--- | :--- | :--- |
 | `--data-dir <path>` (or `--data-dir=<path>`) | `HOUSEKEEPING_DATA_DIR`, `DATA_DIR`, `APP_HOME` | `<InstallRoot>\data` | Overrides `<DataDir>` for `settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, and `manifests\`. Marks invocation as sandboxed. |
 | `--config <filePath>` (or `--config=<filePath>`) | `HOUSEKEEPING_CONFIG_FILE`, `CONFIG_PATH` | `<DataDir>\settings.json` | Overrides the active JSON configuration file path. |
-| `--log-dir <path>` (or `--log-dir=<path>`) | `HOUSEKEEPING_LOG_DIR`, `LOG_DIR` | `<InstallRoot>\logs` (or `<DataDir>\logs` when custom `--data-dir` is passed) | Overrides `<LogsDir>` for `Housekeeping_Live.log`, `runs\`, `crashes\`, and `telemetry_heartbeat.json`. |
+| `--log-dir <path>` (or `--log-dir=<path>`) | `HOUSEKEEPING_LOG_DIR`, `LOG_DIR` | `<InstallRoot>\logs` (or `<DataDir>\logs` when custom `--data-dir` is passed) | Overrides `<LogsDir>` (`ActiveLogsDir`) for `Housekeeping_Live.log`, `runs\`, `crashes\`, System Doctor exports, and `telemetry_heartbeat.json`. |
 | `--port <1..65535>` (or `--port=<n>`) | `HOUSEKEEPING_PORT`, `PORT` | `5178` (`15178` in Sandbox) | Overrides `WebServer.Port` for Kestrel HTTP & SignalR binding. |
+| `--localhost-only` | — | `false` | Forces loopback-only `127.0.0.1` Kestrel binding (disables LAN/Tailnet listener). |
 | `--headless` | `HOUSEKEEPING_HEADLESS=1` | `false` (Tray Host) / `true` (`Server.exe`) | Runs Kestrel web/API server and background scheduler without WinForms system tray UI or WebView2 window. |
+| `--status` | — | `false` | **One-shot CLI probe:** Outputs structured JSON (`version`, `dataDir`, `configPath`, `logsDir`, `configValid`, `daemonReachable`, `port`) and exits synchronously (`0`). |
+| `--repair-config` | — | `false` | **One-shot CLI healer:** Validates `settings.json`; if corrupt, quarantines it to `settings.json.corrupt_<timestamp>.bak`, restores from `.bak`/snapshot/defaults, prints JSON summary, and exits (`0`). |
 | `--test-mode` | `HOUSEKEEPING_TEST_MODE=1`, `TEST_MODE=1` | `false` | Enables sandbox containment (`ConfigService.IsTestMode = true`), disables post-run OS sleep/shutdown, and scopes single-instance mutex to `Global\Housekeeping_3_Scoped_<hash>`. |
 | `--dry-run` | `HOUSEKEEPING_DRY_RUN=1`, `DRY_RUN=1` | `false` | Sets `PipelineOrchestrator.ForceDryRun = true` so every manual or scheduled run logs `[DRY]` actions without modifying disk. |
-| `--minimized` / `--tray` | — | `false` | Starts the tray daemon silently without popping open the standalone WebView2 window or browser on startup. |
+| `--minimized` / `--tray` / `--silent` | — | `false` | Starts the tray daemon silently without popping open the standalone WebView2 window or browser on startup. |
+| `--managed-by-mother` | — | `false` | Suppresses the standalone system tray icon when supervised by Mother v1.0. |
 | `--version` / `-v` | — | — | Prints `Housekeeping v<Version>` and exits with code `0`. |
 | `--help` / `-h` / `/?` | — | — | Prints CLI usage reference and exits with code `0`. |
 
-> [!WARNING]
-> **Operator Note on `scripts\status-check.bat` and `scripts\interactive\repair-config.bat`:** In `v1.0.0-rc.11-hf.2`, [`status-check.bat`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/status-check.bat#L1-L7) invokes `Housekeeping.exe --headless --status` and [`repair-config.bat`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/interactive/repair-config.bat#L1-L8) invokes `Housekeeping.exe --repair-config`. Because [`HousekeepingCliParser.Parse`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hosting/HousekeepingCliParser.cs#L196-L200) places unrecognized flags into `RemainingArgs` rather than exiting immediately, those two batch files currently start a server session instead of performing a one-shot exit. To check live status non-interactively, query `Invoke-RestMethod http://127.0.0.1:5178/api/v1/health` (or `/api/scheduler/status`); to repair or restore `settings.json`, use `POST /api/v1/config/snapshots/{id}/restore` or copy `data\settings.json.bak` over `data\settings.json` while stopped.
+> [!TIP]
+> **One-Shot Operational Batch Scripts (`v0.1.12+`):** [`scripts\status-check.bat`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/status-check.bat), [`scripts\interactive\inspect-status.bat`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/interactive/inspect-status.bat), and [`scripts\interactive\repair-config.bat`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/interactive/repair-config.bat) invoke `Housekeeping.exe` with `--status` or `--repair-config`. [`Housekeeping.Launcher\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Launcher/Program.cs) (`ShouldWaitForChild`) and [`HousekeepingCliRunner`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hosting/HousekeepingCliRunner.cs) execute these flags synchronously and exit immediately without starting a background daemon.
 
-### 2.2 Installer CLI Flags (`Housekeeping-Setup-v*.exe`)
-Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Installer/Program.cs#L1797-L1914):
+### 2.2 Operational Batch Scripts (`<InstallRoot>\scripts\`)
+
+| Script | Path | Behavior |
+| :--- | :--- | :--- |
+| `start-daemon.bat` | `scripts\start-daemon.bat` | Starts `Housekeeping.exe --minimized --data-dir "<Root>\data" --log-dir "<Root>\logs"` in the background. |
+| `stop-daemon.bat` | `scripts\stop-daemon.bat` | Sends `POST http://127.0.0.1:5178/api/v1/system/shutdown` (`InitiateGracefulShutdownAbort`, preserving active checkpoints and `PendingRuns`) and exits `0`. |
+| `status-check.bat` | `scripts\status-check.bat` | Executes `Housekeeping.exe --headless --status --data-dir "<Root>\data" --log-dir "<Root>\logs"` and returns exit code. |
+| `backup-now.bat` | `scripts\backup-now.bat` | Compresses `data\settings.json` and `data\history.json` into `<Root>\backups\manual_backup_<timestamp>.7z` (`-mx=9`, or `.zip` fallback). |
+| `inspect-status.bat` | `scripts\interactive\inspect-status.bat` | Interactive wrapper calling `status-check.bat` followed by `pause`. |
+| `repair-config.bat` | `scripts\interactive\repair-config.bat` | Interactive wrapper calling `Housekeeping.exe --repair-config --data-dir "<Root>\data"` followed by `pause`. |
+| `tail-logs.bat` | `scripts\interactive\tail-logs.bat` | Streams `<Root>\logs\Housekeeping_Live.log` live (`Get-Content -Wait -Tail 40`). |
+
+### 2.3 Installer CLI Flags (`Housekeeping-Setup-v0.1.12-win-x64.exe`)
+Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Installer/Program.cs) and [`Program.DiagnosticsAndCleanup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Installer/Program.DiagnosticsAndCleanup.cs):
 - `--install-dir <dir>` / `--target-dir <dir>`: Target installation root (default `%LOCALAPPDATA%\Programs\Housekeeping`, or `HOUSEKEEPING_INSTALL_DIR` / `INSTALL_DIR`).
 - `--silent` / `--quiet` / `--headless`: Non-interactive console execution (skips WinForms wizard).
 - `--verify`: Verifies embedded `payload.zip` SHA-256 hash against `metadata.json` and exits (`0` = valid).
@@ -90,16 +113,20 @@ Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Hou
 
 ## 3. Configuration & Settings File Reference (`data\settings.json`)
 
-[`ConfigService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs#L209-L762) manages `<DataDir>\settings.json` at **`ConfigVersion = 4` (`CurrentSchemaVersion = 4`)**:
+[`ConfigService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs) and [`ConfigService.AtomicIoAndMigrations.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.AtomicIoAndMigrations.cs) manage `<DataDir>\settings.json` at **`ConfigVersion = 4` (`CurrentSchemaVersion = 4`)**:
 
-- **Automatic Schema Migration (`MigrateConfig` [`L573-L602`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs#L573-L602)):**
+- **Unique Per-Caller Atomic `.tmp` Writes (`AtomicWriteAllText`):**
+  - Writes UTF-8 No-BOM to `{target}.{pid}.{guid:N}.tmp`, flushes, backs up `{target}.bak`, and commits via `File.Move(..., overwrite: true)` with bounded SMB retry and `finally` temp cleanup—eliminating sharing violations under 16-way concurrent local or SMB saves (`BUG-04`).
+- **Forward-Compatible Additive Properties (`[JsonExtensionData]`):**
+  - `AppConfig` preserves unknown future JSON keys across round-trips and ships additive `v0.1.12` defaults (`UiLayout`, `AutoAlignWithSisterApps`, `SkipShadowLibraryManagedRoots`, `SyncPostInjectionContainerHashJson`).
+- **Automatic Schema Migration (`MigrateConfig`):**
   - `v1 -> v2`: Seeds `DefinedJobs` and `NamedQueues` from legacy single-module configs.
   - `v2 -> v3`: Initializes built-in `ArchiveComplianceTemplate` definitions (`auto-community`, `redump-optical`, `nointro-cartridge`, `community-modern-disc`, `official-folder-dump`).
   - `v3 -> v4`: Migrates `WebServer.DefaultDesktopLaunchMode` from `"Browser"` to `"StandaloneWindow"` so tray double-click opens `DisposableWebViewForm`.
-- **Legacy Root-to-`data\` Auto-Migration (`MigrateLegacyRootStateIfPresent` [`L218-L332`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs#L218-L332)):**
-  - On startup (and during installer upgrade), if `settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, `manifests\`, or `tools\` exist loose in `<InstallRoot>\`, they are atomically moved/merged into `<InstallRoot>\data\`.
-- **20-Snapshot Rollback History (`CreateSnapshotIfChanged` [`L857-L949`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs#L857-L949)):**
-  - Every `TryUpdateAndSave` call hashes the serialized JSON with SHA-256; if content changed, a timestamped snapshot (`settings_yyyyMMdd_HHmmss_fff.json`) is written to `<InstallRoot>\backups\config_snapshots\` and older files beyond **20** are pruned.
+- **Legacy Root-to-`data\` Auto-Migration (`ConfigService.LegacyRootMigration.cs`):**
+  - On startup (and during installer upgrade), any loose legacy `settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, `manifests\`, or `tools\` in `<InstallRoot>\` are atomically moved/merged into `<InstallRoot>\data\`.
+- **20-Snapshot Rollback History (`CreateSnapshotIfChanged`):**
+  - Every `TryUpdateAndSave` hashes the serialized JSON with SHA-256; if content changed, a timestamped snapshot (`settings_yyyyMMdd_HHmmss_fff.json`) is written to `<InstallRoot>\backups\config_snapshots\` and older files beyond **20** are pruned.
 
 ---
 
@@ -107,30 +134,32 @@ Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Hou
 
 | Resource / Mechanism | Identifier / Value | Scope & Coexistence Rules |
 | :--- | :--- | :--- |
-| **Production HTTP & SignalR Port** | `5178` (`http://127.0.0.1:5178` or `0.0.0.0:5178`) | Configured in `WebServer.Port` and `mother.manifest.json`. If port `5178` is occupied during a non-production/test launch, [`HousekeepingServerHost.StartAsync`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hosting/HousekeepingServerHost.cs#L135-L178) automatically falls back to an ephemeral port (`127.0.0.1:0`) so tests never crash. |
+| **Production HTTP & SignalR Port** | `5178` (`http://127.0.0.1:5178` or `0.0.0.0:5178`) | Configured in `WebServer.Port`, `mother.manifest.json`, and `app\suite.manifest.json`. Falls back to ephemeral `127.0.0.1:0` during non-production/test port collisions. |
 | **Sandbox Verification Port** | `15178` | Passed via `--port 15178` during `Sandbox\` verification so sandbox runs never collide with live production on `:5178`. |
-| **Tailscale Serve HTTPS Port** | `443` (or `8578` in `mother.manifest.json`) | Managed via [`TailscalePwaService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Services/TailscalePwaService.cs#L140-L265) (`tailscale serve --bg --https=443 http://127.0.0.1:5178`). |
-| **Single-Instance Mutex** | `Global\Housekeeping_2_SingleInstance_Mutex` | Enforced in [`DesktopHost\Program.cs#L16,L199-L218`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.DesktopHost/Program.cs#L199-L218). When any sandbox flag (`--test-mode`, `--dry-run`, `--headless`, `--port`, `--data-dir`, `--config`, `--log-dir`) is present, switches to `Global\Housekeeping_3_Scoped_<12hex>` so sandbox instances never collide with production or trigger `HOUSEKEEPING_RESTORE_WINDOW` on the live tray daemon. |
-| **Distributed Transcode Lockfile** | `<finalOutputPath>.hklock` | JSON lockfile written by [`NetworkSafetyService.TryAcquireDistributedLock`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.cs#L383-L466) with a 60s heartbeat timer and 90-minute stale reclamation timeout. |
-| **Mother v1.0 Fleet Coexistence** | [`mother.manifest.json`](file:///D:/Projects/Personal/Housekeeping/Dev/mother.manifest.json) | Declares `health_endpoint: "http://127.0.0.1:5178/api/v1/health"`, `scheduler_status_endpoint: "/api/scheduler/status"`, `scheduler_defer_endpoint: "/api/scheduler/defer"`, and `graceful_shutdown_endpoint: "/api/system/shutdown"`. Mother calls `/api/scheduler/defer` during heavy cross-app disk I/O to pause Housekeeping schedules cleanly. |
-| **Greenroom (`:8420`) Coexistence** | `http://127.0.0.1:8420/api/sync` | [`GreenroomSyncIntegrationService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/GreenroomSyncIntegrationService.cs#L170-L321) posts `collect_library` + `verify_hashes` (Module 4) or `collect_library` + `collect_plex` (Module 8) only when SHA-256 manifest fingerprints actually change, falling back to `run_greenroom.bat` if `:8420` is offline. |
+| **Tailscale Serve HTTPS Port** | `443` (or `8478` in `suite.manifest.json`) | Managed via [`TailscalePwaService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Services/TailscalePwaService.cs) (`tailscale serve --bg --https=443 http://127.0.0.1:5178`). |
+| **Single-Instance Mutex** | `Global\Housekeeping_2_SingleInstance_Mutex` | Switches to `Global\Housekeeping_3_Scoped_<12hex>` whenever any sandbox flag (`--test-mode`, `--dry-run`, `--headless`, `--port`, `--data-dir`, `--config`, `--log-dir`) is present. |
+| **Per-File Distributed Lockfile** | `<finalOutputPath>.hklock` | JSON lockfile written by [`NetworkSafetyService.DistributedLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DistributedLocks.cs) with a 60s heartbeat timer and 90-minute stale reclamation timeout. |
+| **Standard 19 §4 Directory Sentinel** | `<TargetDir>\.<appId>_<pid>.hklock` | JSON `schemaVersion: 1` sentinel written/inspected by [`NetworkSafetyService.DirectoryLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DirectoryLocks.cs) carrying `pid` + `processStartTimeUtc`. Automatically evicts dead or recycled-PID locks while deferring when `ShadowLibrary`, `Redroom`, `uStation`, or `StreamEngine` holds a live lock. |
+| **Shared-Root Coexistence Manifest** | `<SharedRoot>\.coexistence.json` | Standard 19 §3 `schemaVersion: 2` manifest managed by [`SisterAppCoexistenceService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SisterAppCoexistenceService.cs) (`GET /api/v1/coexistence/status`, `POST /api/v1/coexistence/apply-recommendations`) coordinating ownership and `.hash` placement across all 5 peer apps. |
+| **Post-Injection Archive Registry** | `<TargetDir>\.archive_hashes.json` | `schemaVersion: 1` JSON registry written by [`HashSidecarService.ArchiveRegistry.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.ArchiveRegistry.cs) storing outer archive size, `lastWriteUtc`, `CRC32`, `MD5`, and `SHA1` after sidecar injection (`PackageInsideArchive` / `SidecarAndArchive`) or `7z d` cleanup. |
+| **Clean-Release-Root Fleet SMB Sync** | `<RemoteRoot>\app\` & `<RemoteRoot>\data\` | [`RemoteNodeDeploymentService.PathLayout.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/RemoteNodeDeploymentService.PathLayout.cs) resolves Clean-Release-Root remote node paths (with legacy flat fallback) while excluding `data\`, `backups\`, `webview2_cache`, `pending_swaps.json`, `compliance_reports.json`, and `.hk_cookie_secret.key`. |
+| **Mother v1.0 & Greenroom (`:8420`)** | `mother.manifest.json` & `:8420/api/sync` | Mother polls `/api/v1/health` + `/api/scheduler/status` and defers I/O via `/api/scheduler/defer`. `GreenroomSyncIntegrationService` posts changed manifest fingerprints to `http://127.0.0.1:8420/api/sync` (or `run_greenroom.bat`). |
 
 ---
 
 ## 5. Logs, Heartbeats, Crash Bundles & System Doctor
 
 1. **Rolling Live Log (`<LogsDir>\Housekeeping_Live.log`):**
-   - Managed by [`TerminalLogBufferService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/TerminalLogBufferService.cs#L24-L268).
-   - Rotates at **`10 MB` (`MaxLiveLogBytes = 10 * 1024 * 1024`)** across **5 generations** (`Housekeeping_Live.1.log` through `Housekeeping_Live.5.log`).
+   - Managed by [`TerminalLogBufferService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/TerminalLogBufferService.cs) (`10 MB × 5` generations: `Housekeeping_Live.1.log` .. `.5.log`), automatically deduplicating repeated `[WARN] [WARN]` / HandBrake `[HH:mm:ss]` prefixes while preserving `[Severity] [Component]` grammar.
 2. **Per-Run Transcripts (`<LogsDir>\runs\Run_<Queue>_<yyyyMMdd_HHmmss>.log`):**
-   - Attached at the start of every queue/job execution and pruned automatically after **30 days** (`MaxRunLogRetentionDays = 30`) by [`TerminalLogBufferService.PruneStaleRunLogs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/TerminalLogBufferService.cs#L173-L204).
+   - Attached at the start of every queue/job execution and pruned automatically after **30 days** (`MaxRunLogRetentionDays = 30`).
 3. **10s / 30s Telemetry Heartbeat (`<LogsDir>\telemetry_heartbeat.json`):**
-   - Written atomically via `.tmp` swap by [`SystemPerformanceTelemetryService.PublishHeartbeatFile`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SystemPerformanceTelemetryService.cs#L197-L234) every **10 seconds** during active pipeline execution and every **30 seconds** while idle.
-4. **Zero-PII Crash Bundles (`<LogsDir>\crashes\crash_<yyyyMMdd_HHmmss>_<8hex>.json`):**
-   - Written by [`CrashBundleService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/CrashBundleService.cs#L115-L425) on any unhandled exception with `SchemaVersion: "1.0"`, sanitized command line, failing module/file/line, stack trace, and the 50 preceding terminal log lines (`PrecedingLogRingBuffer`), retaining the 30 newest bundles.
-5. **🩺 System Doctor (`Settings` $\rightarrow$ `System Doctor` & `/api/v1/doctor/*`):**
-   - **`POST /api/v1/doctor/backup`:** Creates a timestamped `.7z` (or `.zip` fallback) archive of `settings.json`, `history.json`, `compliance_reports.json`, and `pending_swaps.json` in `<InstallRoot>\backups\config_snapshots\`.
-   - **`GET /api/v1/doctor/diagnostic-bundle`:** Downloads a sanitized JSON diagnostic bundle containing app version, OS/machine info, dependency status, mounted drive metrics, sanitized `AppConfig`, recent history, and the last 250 log lines.
+   - Written atomically via `.tmp` swap by [`SystemPerformanceTelemetryService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SystemPerformanceTelemetryService.cs) every **10 seconds** during active pipeline execution and every **30 seconds** while idle.
+4. **Filtered Zero-PII Crash Bundles (`<LogsDir>\crashes\crash_<yyyyMMdd_HHmmss>_<8hex>.json`):**
+   - Managed by [`CrashBundleService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/CrashBundleService.cs) and [`CrashBundleExceptionFilter`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/CrashBundleExceptionFilter.cs). Calls `e.SetObserved()` on `TaskScheduler.UnobservedTaskException`, suppresses false-positive dumps from benign `OperationCanceledException` and idle pooled `SocketException (10054)` resets (`FleetHttpClient` `PooledConnectionIdleTimeout = 25s`), and retains the 30 newest sanitized bundles.
+5. **🩺 Contained System Doctor (`Settings` $\rightarrow$ `System Doctor` & [`HousekeepingApiEndpoints.SystemDoctorAndBackup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.SystemDoctorAndBackup.cs)):**
+   - **`POST /api/v1/system/backup/now` (`/api/v1/doctor/backup`):** Writes a clean JSON state-only backup archive (`settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `interrupted_run_checkpoint.json` opened with `FileShare.ReadWrite`) strictly into sibling `<InstallRoot>\backups\` (`Path.GetDirectoryName(SnapshotsDir)`), preventing `ZipFile` self-inclusion and locked `webview2_cache` `IOException` crashes (`BUG-05`).
+   - **`POST` / `GET /api/v1/system/doctor/export-bundle` (`/api/v1/doctor/diagnostic-bundle`):** Writes sanitized diagnostic JSON bundles strictly inside `ActiveLogsDir` (`--log-dir`), never leaking into `AppContext.BaseDirectory\logs`.
 
 ---
 
@@ -139,66 +168,66 @@ Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Hou
 ### 6.1 Backing Up Canonical Production State
 Always back up `D:\Programs\Housekeeping\data\` before manual migrations or major upgrades:
 ```powershell
-# Option A: Use the built-in batch script (creates a timestamped .7z in backups\config_snapshots\)
-D:\Programs\Housekeeping\scripts\backup-data.bat
+# Option A: Use the built-in batch script (creates manual_backup_<timestamp>.7z in D:\Programs\Housekeeping\backups\)
+D:\Programs\Housekeeping\scripts\backup-now.bat
 
-# Option B: Trigger via REST API while Housekeeping is running
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5178/api/v1/doctor/backup"
+# Option B: Trigger clean state-only archive via REST API while Housekeeping is running
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5178/api/v1/system/backup/now"
 ```
 
-### 6.2 Restoring a Configuration Snapshot
+### 6.2 Restoring or Repairing Configuration
 - **From Web / Desktop UI:** Click **↺ History (`N`)** in the Top Command Bar, choose a snapshot from the table, and click **Restore**.
-- **From Disk While Stopped:**
-  1. Run `D:\Programs\Housekeeping\scripts\stop.bat` (or exit via the system tray icon).
+- **One-Shot Automatic CLI Repair:** Run `D:\Programs\Housekeeping\scripts\interactive\repair-config.bat` (or `D:\Programs\Housekeeping\Housekeeping.exe --repair-config --data-dir "D:\Programs\Housekeeping\data"`).
+- **Manual Restore From Disk While Stopped:**
+  1. Run `D:\Programs\Housekeeping\scripts\stop-daemon.bat` (or exit via the system tray icon).
   2. Copy the desired `D:\Programs\Housekeeping\backups\config_snapshots\settings_*.json` (or `data\settings.json.bak`) over `D:\Programs\Housekeeping\data\settings.json`.
-  3. Run `D:\Programs\Housekeeping\scripts\start.bat`.
+  3. Run `D:\Programs\Housekeeping\scripts\start-daemon.bat`.
 
 ---
 
 ## 7. Build, Deployment, Upgrade & Rollback Runbook
 
 ### 7.1 End-to-End Build, Sign & Package Pipeline (`build_installer.ps1`)
-Run [`Dev\scripts\build_installer.ps1`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/build_installer.ps1#L1-L343) from `D:\Projects\Personal\Housekeeping\Dev\`:
+Run [`Dev\scripts\build_installer.ps1`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/build_installer.ps1) from `D:\Projects\Personal\Housekeeping\`:
 ```powershell
-powershell -ExecutionPolicy Bypass -File "D:\Projects\Personal\Housekeeping\Dev\scripts\build_installer.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Projects\Personal\Housekeeping\Dev\scripts\build_installer.ps1" -Version "0.1.12"
 ```
 What `build_installer.ps1` executes automatically:
-1. Reads the target version from [`Dev\version.txt`](file:///D:/Projects/Personal/Housekeeping/Dev/version.txt).
-2. Builds the React 19 SPA (`npm run build` in `Dev\Housekeeping.Web\`) into `Dev\Housekeeping.Server\wwwroot\`.
-3. Publishes `Housekeeping.DesktopHost` and `Housekeeping.Server` into `Builds\current\app\` and publishes `Housekeeping.Launcher` (`Housekeeping.exe`) to `Builds\current\`.
-4. Copies `mother.manifest.json`, `scripts\`, and `scripts\interactive\` into `Builds\current\`.
-5. Stages `payload.zip` and `metadata.json` (with SHA-256 digest and zero-PII audit) and compiles the single-file installer `Installers\Housekeeping-Setup-v<Version>.exe`.
-6. Signs the root launcher, app binaries, and setup `.exe` with the `Housekeeping Local Authenticode` code-signing certificate (`Set-AuthenticodeSignature`).
-7. Mirrors the newest installer to `D:\Projects\Installers\` (removing superseded `Housekeeping-Setup-*.exe` copies there) and packages the 6-file release bundle in `Releases\v<Version>\` + `Releases\Latest\` + `.7z` archives.
+1. Auto-restores `node_modules` if absent and builds the React 19 SPA (`npm --prefix Housekeeping.Web run build`) into `Dev\Housekeeping.Server\wwwroot\`.
+2. Publishes `Housekeeping.DesktopHost`, `Housekeeping.Server`, and `Housekeeping.Launcher` into `Builds\v0.1.12\`, stamping portable zero-PII `Builds\v0.1.12\AGENTS.md` (`<= 40 lines / < 2 KB`), `mother.manifest.json`, `app\suite.manifest.json`, `scripts\`, and `scripts\interactive\`.
+3. Copies all `Housekeeping.Installer\*.cs` partial files into `%TEMP%` staging, builds `payload.zip` + `metadata.json` (with SHA-256 digest and zero-PII audit), and compiles `Installers\Housekeeping-Setup-v0.1.12-win-x64.exe`.
+4. Signs the root launcher, app binaries, and setup `.exe` with Authenticode (`Set-AuthenticodeSignature`).
+5. Mirrors the newest installer to `D:\Projects\Installers\` and packages the 6-file release bundle in `Releases\v0.1.12\`, `Releases\Latest\`, `Releases\v0.1.12.7z`, and `Releases\Latest.7z` (generating sanitized `README.md` from `USER_GUIDE.md` and dynamic `RELEASE_NOTES.md` from `CHANGELOG.md`).
 
 ### 7.2 Safe Production Deployment (`D:\Programs\Housekeeping\`)
 > [!CAUTION]
 > **Production Deployment Gate ([Dev Bible Standard 03 §2–§3](file:///D:/Projects/Personal/_DevBible/03_VERSIONING_AND_RELEASES.md)):** Never deploy Nightly/Test builds to `D:\Programs\Housekeeping\` and never stop or overwrite production without explicit user confirmation.
 ```powershell
 # 1. Back up canonical production data\ first
-D:\Programs\Housekeeping\scripts\backup-data.bat
+D:\Programs\Housekeeping\scripts\backup-now.bat
 
 # 2. Run the signed installer in silent upgrade mode targeting D:\Programs\Housekeeping
-D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v1.0.0-rc.11-hf.2.exe --silent --install-dir "D:\Programs\Housekeeping" --launch
+D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-win-x64.exe --silent --install-dir "D:\Programs\Housekeeping" --launch
 
-# 3. Verify health endpoint
+# 3. Verify health & coexistence endpoints
 Invoke-RestMethod -Uri "http://127.0.0.1:5178/api/v1/health"
+Invoke-RestMethod -Uri "http://127.0.0.1:5178/api/v1/coexistence/status"
 ```
 
 ### 7.3 Rollback Procedure
-If a newly deployed RC exhibits regressions:
-1. Stop Housekeeping (`D:\Programs\Housekeeping\scripts\stop.bat`).
-2. Run the previous known-good versioned installer from `D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v<PreviousVersion>.exe --silent --install-dir "D:\Programs\Housekeeping" --launch`.
+If a newly deployed build exhibits regressions:
+1. Stop Housekeeping (`D:\Programs\Housekeeping\scripts\stop-daemon.bat`).
+2. Run the previous known-good versioned installer (`D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v<PreviousVersion>-win-x64.exe --silent --install-dir "D:\Programs\Housekeeping" --launch`).
 3. If `settings.json` needs to be reverted, restore the pre-upgrade snapshot from `D:\Programs\Housekeeping\backups\config_snapshots\`.
 
 ---
 
 ## 8. Sandbox Verification Recipe (`Sandbox\`)
 
-Before promoting any build, verify the installer and runtime inside `D:\Projects\Personal\Housekeeping\Sandbox\` with 100% fail-closed isolation (zero `D:\Programs\Housekeeping` or host Registry/Start Menu mutations):
+Before promoting any build, verify the installer, one-shot CLI flags, and headless runtime inside `D:\Projects\Personal\Housekeeping\Sandbox\` with 100% fail-closed isolation:
 
 ```powershell
-$setup = "D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v1.0.0-rc.11-hf.2.exe"
+$setup = "D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-win-x64.exe"
 $sbRoot = "D:\Projects\Personal\Housekeeping\Sandbox"
 
 # 1. Verify embedded payload SHA-256
@@ -212,41 +241,49 @@ $sbRoot = "D:\Projects\Personal\Housekeeping\Sandbox"
   --log-dir "$sbRoot\logs" `
   --no-shortcuts --no-launch
 
-# 3. Boot headless sandbox instance on port 15178 with --test-mode and --dry-run
+# 3. Verify synchronous one-shot CLI flags (--status & --repair-config)
+& "$sbRoot\app\Housekeeping.exe" --status --data-dir "$sbRoot\data" --log-dir "$sbRoot\logs"
+& "$sbRoot\app\Housekeeping.exe" --repair-config --data-dir "$sbRoot\data"
+
+# 4. Boot headless sandbox instance on port 15178 with --test-mode and --dry-run
 $proc = Start-Process -FilePath "$sbRoot\app\Housekeeping.exe" -ArgumentList @(
-  "--headless", "--test-mode", "--dry-run",
+  "--headless", "--localhost-only", "--test-mode", "--dry-run",
   "--port", "15178",
   "--data-dir", "$sbRoot\data",
   "--config", "$sbRoot\data\settings.json",
   "--log-dir", "$sbRoot\logs"
 ) -PassThru
 
-# 4. Probe sandbox health & scheduler endpoints, then shut down cleanly
+# 5. Probe sandbox health, coexistence, scheduler & doctor endpoints, then shut down cleanly
 Start-Sleep -Seconds 3
 Invoke-RestMethod -Uri "http://127.0.0.1:15178/api/v1/health"
+Invoke-RestMethod -Uri "http://127.0.0.1:15178/api/v1/coexistence/status"
 Invoke-RestMethod -Uri "http://127.0.0.1:15178/api/scheduler/status"
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:15178/api/system/shutdown"
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:15178/api/v1/system/shutdown"
 ```
 
 ---
 
 ## 9. Incident Playbooks (Empirical Production & Audit Case Studies)
 
-### Playbook 1 — Locked Media Destination File During Transcode (`PendingSwapService`)
-- **Historical Context:** [Report `v1.0.0-nightly.20261101.-.pending-swap-recovery.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v1.0.0-nightly.20261101.2026-11-01_0000.-.pending-swap-recovery.md). When `HandBrakeCLI` finished a multi-hour 4K encode while Plex or an SMB client held a read lock on the destination `.mkv`, `File.Move` threw an `IOException`.
-- **Diagnosis:** Check the Dashboard for the **⏳ Deferred Pending Swap(s) Ready** banner or inspect `data\pending_swaps.json` (`GET /api/v1/pipeline/state` $\rightarrow$ `PendingSwapCount`).
-- **Remediation:** Once playback ends, click **🔄 Commit Swaps Now** (`POST /api/v1/pipeline/pending-swaps/retry`), which calls [`PendingSwapService.SweepAndCommitAll`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/PendingSwapService.cs#L171-L196) to atomically move `<stem>.partial<ext>` over the destination file without re-encoding.
+### Playbook 1 — Locked `.partial` or Media Destination File During Transcode (`BUG-01` & `PendingSwapService`)
+- **Historical Context:** [Report `v0.1.11.2026-11-11_1952`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v0.1.11.2026-11-11_1952.-.full-audit-optimizations-and-undetected-errors.md) (`BUG-01`). Live logs caught SMB/Defender opportunistic locks holding `.partial.mkv` immediately after `HandBrakeCLI` exited, while pre-move `File.Delete(finalOutputPath)` risked deleting existing media targets.
+- **Diagnosis:** Check the Dashboard for **⏳ Deferred Pending Swap(s) Ready** or inspect `Housekeeping_Live.log` for exact lock attribution (`workingOutputPath` `.partial` locked vs. `finalOutputPath` destination locked).
+- **Remediation:** [`NetworkSafetyService.CommitPartialEncode`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.cs) and [`PendingSwapService.RetrySwap`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/PendingSwapService.cs) now probe both paths with `TryProbeExclusiveAccess` (`FileShare.None`) **without** pre-deleting `finalOutputPath`, then execute atomic `File.Move(working, final, overwrite: true)`. Click **🔄 Commit Swaps Now** (`POST /api/v1/pipeline/pending-swaps/retry`) once playback or scanning finishes.
 
 ### Playbook 2 — Orphaned `rclone bisync` `.lck` File Blocking Cloud Sync
-- **Historical Context:** `CHANGELOG.md` `v1.0.0-rc.7` / [`CodeAuditRc7RegressionTests.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Tests/CodeAuditRc7RegressionTests.cs). When `rclone bisync` was killed mid-transfer, its `.lck` file remained in `%LOCALAPPDATA%\rclone\bisync\`, and ANSI color sequences in `rclone`'s error output previously prevented regex matching.
+- **Historical Context:** `CHANGELOG.md` `v1.0.0-rc.7` / [`CodeAuditRc7RegressionTests.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Tests/CodeAuditRc7RegressionTests.cs).
 - **Diagnosis:** Look for `[WARN] Detected orphaned rclone bisync lockfile` in `Housekeeping_Live.log`.
-- **Remediation:** [`CloudSyncModule.TryRecoverOrphanedBisyncLock`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/Modules/CloudAndHumbleSyncModules.cs#L150-L185) automatically strips ANSI codes, verifies no active `rclone.exe` PID is running, deletes the `.lck` file, and retries `bisync`. If `rclone` reports bisync state divergence (`Must run --resync`), open the Cloud Sync job in **Job Builder** and click **⚡ Run Once with --resync**.
+- **Remediation:** [`CloudSyncModule`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/Modules/CloudSyncModule.cs) strips ANSI codes, verifies no active `rclone.exe` PID is running, deletes the `.lck` file, and retries `bisync`. If `rclone` reports state divergence (`Must run --resync`), open the Cloud Sync job in **Job Builder** and click **⚡ Run Once with --resync**.
 
 ### Playbook 3 — Per-Module Scheduler DST Fall-Back Stall
-- **Historical Context:** [Report `v1.0.0-nightly.20261101.-.per-module-scheduler-dst.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v1.0.0-nightly.20261101.2026-11-01_0000.-.per-module-scheduler-dst.md). Comparing `LastScheduledRun` in local `DateTime.Now` caused a 1-hour stall during Daylight Saving Time fall-back transitions and risked clobbering `LastScheduledRun` when saving unrelated UI settings.
-- **Remediation:** [`SchedulerAndNotificationService.CheckModule`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SchedulerAndNotificationService.cs#L732-L765) normalizes all cadence elapsed-time math to UTC (`ToUniversalTime()`), and [`ConfigService.PreserveModuleScheduleUtc`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs#L764-L788) preserves server-side `LastScheduledRun` timestamps across UI config saves.
+- **Historical Context:** [Report `v1.0.0-nightly.20261101.-.per-module-scheduler-dst.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v1.0.0-nightly.20261101.2026-11-01_0000.-.per-module-scheduler-dst.md).
+- **Remediation:** [`SchedulerAndNotificationService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SchedulerAndNotificationService.cs) normalizes all cadence elapsed-time math to UTC (`ToUniversalTime()`), and [`ConfigService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/ConfigService.cs) preserves server-side `LastScheduledRun` timestamps across UI config saves.
 
-### Playbook 4 — ShadowLibrary `.hash` Sidecar Ping-Pong & Repacked Container False Positives
-- **Historical Context:** [Report `v1.0.0-rc.11-hf.2.-.shadowlibrary-hashing-and-sidecar-compatibility.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v1.0.0-rc.11-hf.2.2026-11-03_0606.-.shadowlibrary-hashing-and-sidecar-compatibility.md) & Plan [`v1.0.0-rc.12.2026-11-04.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/plans/v1.0.0-rc.12.2026-11-04.md).
-- **Diagnosis:** When Housekeeping and ShadowLibrary both audit the same ROM directory, outer `.7z` repacks or missing `MD5:` fields in legacy sidecars can cause repeated sidecar rewrites.
-- **Remediation:** Enable **Two-Step Archive Inspection (`CheckInnerArchiveAndContainer`)** and **Auto-Heal Repacked Containers (`EnableBitRotAutoHeal`)** in Module 4 / Module 8, or run **🔐 Verify & Heal .hash Now** (`FastHeaderAndHeal`), which validates inner 7-Zip CRC32 headers and writes full `SIZE + CRC32 + MD5 + SHA1` + `# Container:` sidecar headers compatible with ShadowLibrary.
+### Playbook 4 — ShadowLibrary `.hash` Sidecar Ping-Pong & Post-Injection Container Drift
+- **Historical Context:** [Report `v1.0.0-rc.11-hf.2.2026-11-03_0606`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v1.0.0-rc.11-hf.2.2026-11-03_0606.-.shadowlibrary-hashing-and-sidecar-compatibility.md) & Plan [`v0.1.12.2026-11-11.md`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/plans/v0.1.12.2026-11-11.md).
+- **Remediation:** Module 4 is now 100% decoupled from `.hash` manipulation (`T13`), while Module 8 (`HashSidecarService.ArchiveRegistry.cs`) supports 4-mode `HashSidecarMode` (`0..3`), preserves `# Container:` + `CRC32+MD5+SHA1` digests without unnecessary rewrites, tracks post-injection outer archive digests in `<Directory>\.archive_hashes.json`, and offers 1-click ShadowLibrary delegation or placement alignment via `SisterAppCoexistenceService`.
+
+### Playbook 5 — Preserving Active Queue Progress Across Upgrades & Daemon Restarts (`BUG-02`)
+- **Historical Context:** [Report `v0.1.11.2026-11-11_1952`](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/archive/v0.1.11.2026-11-11_1952.-.full-audit-optimizations-and-undetected-errors.md) (`BUG-02`). Previously, `POST /api/v1/system/shutdown` invoked `StopActiveRun()`, deleting `interrupted_run_checkpoint.json` and clearing `PendingRuns`.
+- **Remediation:** `POST /api/v1/system/shutdown` (`stop-daemon.bat` & installer upgrade) and `TrayDaemonApplicationContext.ShutdownAndExit()` now call [`PipelineOrchestratorService.InitiateGracefulShutdownAbort()`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/PipelineOrchestratorService.CancellationAndShutdown.cs), which resumes any suspended child tree, aborts active subprocesses cleanly, and **preserves** `data\interrupted_run_checkpoint.json` and `PendingRuns` so work resumes seamlessly after restart.

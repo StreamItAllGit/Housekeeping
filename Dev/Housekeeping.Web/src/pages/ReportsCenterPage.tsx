@@ -1,20 +1,21 @@
+// @module: Housekeeping.Web/pages/ReportsCenterPage
+// @purpose: Archive compliance & .hash integrity Reports Center with inner file tree inspector and guarded 7z d cleanup.
+// @depends-on: react, ../components/ArchiveTemplateEditorDialog, ../components/ReportCleanupDryRunModal, ../context/AppStateContext, ../hints/commonDialogs, ../services/apiClient, ../types/models
+// @exports: ReportsCenterPage
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArchiveTemplateEditorDialog } from '../components/ArchiveTemplateEditorDialog';
-import { ModalDialog } from '../components/ModalDialog';
+import {
+  formatReportBytes,
+  ReportCleanupDryRunModal,
+} from '../components/ReportCleanupDryRunModal';
 import { useAppState } from '../context/AppStateContext';
+import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import { apiClient } from '../services/apiClient';
 import type {
   ArchiveCleanupDryRunResult,
   ComplianceReportItem,
   ReportsQueryResponse,
 } from '../types/models';
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${bytes} B`;
-}
 
 export const ReportsCenterPage: React.FC = () => {
   const {
@@ -56,8 +57,8 @@ export const ReportsCenterPage: React.FC = () => {
       });
       setData(res);
       setOpenComplianceCount(res.kpis.openCount);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug('[ReportsCenterPage] loadReports failed:', err);
     }
   }, [categoryFilter, consoleFilter, searchText, setOpenComplianceCount, statusFilter]);
 
@@ -403,9 +404,11 @@ export const ReportsCenterPage: React.FC = () => {
             <table className="hk-table stack-mobile">
               <thead>
                 <tr>
-                  <th style={{ width: 42 }}>
+                  <th className="hk-has-hint" style={{ width: 42 }} title={COMMON_UI_HINTS.reportsSelectAll}>
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={COMMON_UI_HINTS.reportsSelectAll}
                       checked={items.length > 0 && selectedIds.length === items.length}
                       onChange={(e) =>
                         setSelectedIds(e.target.checked ? items.map((i) => i.ReportId) : [])
@@ -413,12 +416,12 @@ export const ReportsCenterPage: React.FC = () => {
                       aria-label="Select all visible reports"
                     />
                   </th>
-                  <th>Severity</th>
-                  <th>Console</th>
-                  <th>Archive / Folder</th>
-                  <th>Category</th>
-                  <th>Extra</th>
-                  <th>Status</th>
+                  <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Issue Severity')}>Severity</th>
+                  <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Console / System')}>Console</th>
+                  <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Archive or Folder Target')}>Archive / Folder</th>
+                  <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Primary Audit Category')}>Category</th>
+                  <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Cleanable Clutter Count')}>Extra</th>
+                  <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Resolution Status')}>Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -449,6 +452,8 @@ export const ReportsCenterPage: React.FC = () => {
                       <td data-label="Select" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
+                          className="hk-has-hint"
+                          title={COMMON_UI_HINTS.reportsSelectRow}
                           checked={checked}
                           onChange={(e) =>
                             setSelectedIds((prev) =>
@@ -543,11 +548,11 @@ export const ReportsCenterPage: React.FC = () => {
                 <table className="hk-table">
                   <thead>
                     <tr>
-                      <th style={{ width: 48 }}>Clean</th>
-                      <th>Internal Path</th>
-                      <th>Role</th>
-                      <th>CRC32</th>
-                      <th>Size</th>
+                      <th className="hk-has-hint" style={{ width: 48 }} title={COMMON_UI_HINTS.reportsCol('Cleanable Clutter Toggle')}>Clean</th>
+                      <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Inner Archive Path')}>Internal Path</th>
+                      <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Payload vs Clutter Role')}>Role</th>
+                      <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Header CRC32')}>CRC32</th>
+                      <th className="hk-has-hint" title={COMMON_UI_HINTS.reportsCol('Uncompressed Size')}>Size</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -556,6 +561,7 @@ export const ReportsCenterPage: React.FC = () => {
                         <td>
                           <input
                             type="checkbox"
+                            className="hk-has-hint"
                             disabled={!node.CanClean}
                             checked={Boolean(customCleanPaths[node.InternalPath])}
                             onChange={(e) =>
@@ -564,11 +570,7 @@ export const ReportsCenterPage: React.FC = () => {
                                 [node.InternalPath]: e.target.checked,
                               }))
                             }
-                            title={
-                              node.CanClean
-                                ? 'Safe extra clutter eligible for 7z d removal'
-                                : 'Protected primary ROM or companion descriptor (cannot be deleted)'
-                            }
+                            title={COMMON_UI_HINTS.reportsCleanNode(node.CanClean)}
                           />
                         </td>
                         <td className="mono" style={{ fontSize: 11.5 }}>
@@ -576,7 +578,7 @@ export const ReportsCenterPage: React.FC = () => {
                         </td>
                         <td>
                           <span
-                            className={`hk-pill ${node.CanClean ? 'warn' : 'ok'}`}
+                            className={`hk-pill nowrap ${node.CanClean ? 'warn' : 'ok'}`}
                             style={{ fontSize: 10.5 }}
                           >
                             {node.RoleClassification}
@@ -586,7 +588,7 @@ export const ReportsCenterPage: React.FC = () => {
                           {node.Crc32 || '—'}
                         </td>
                         <td style={{ fontSize: 11.5, whiteSpace: 'nowrap' }}>
-                          {formatBytes(node.SizeBytes)}
+                          {formatReportBytes(node.SizeBytes)}
                         </td>
                       </tr>
                     ))}
@@ -603,89 +605,13 @@ export const ReportsCenterPage: React.FC = () => {
         </div>
       </div>
 
-      {/* 7z d Dry-Run Preview & Confirmation Modal */}
-      <ModalDialog
-        open={dryRunPreview !== null}
+      <ReportCleanupDryRunModal
+        dryRunPreview={dryRunPreview}
+        inspectedItem={inspectedItem}
+        busyAction={busyAction}
         onClose={() => setDryRunPreview(null)}
-        title="🧪 Guarded 7z d Clutter Removal — Dry-Run Preview"
-        size="normal"
-        closedBy="any"
-        footer={
-          <>
-            <button type="button" className="hk-btn" onClick={() => setDryRunPreview(null)}>
-              Cancel
-            </button>
-            {dryRunPreview?.IsAllowed && inspectedItem && (
-              <button
-                type="button"
-                className="hk-btn success"
-                disabled={busyAction}
-                onClick={() =>
-                  void handleExecuteCleanExtra(
-                    [inspectedItem.ReportId],
-                    dryRunPreview.FilesToDelete.map((f) => f.InternalPath)
-                  )
-                }
-              >
-                🧹 Execute 7z d &amp; Refresh .hash
-              </button>
-            )}
-          </>
-        }
-      >
-        {dryRunPreview && (
-          <div>
-            {!dryRunPreview.IsAllowed ? (
-              <div className="hk-alert-banner err">
-                <span>🛑 Safety Guard Blocked Cleanup: {dryRunPreview.BlockReason}</span>
-              </div>
-            ) : (
-              <div className="hk-info-banner">
-                <strong>✓ Safety Guard Passed:</strong> {dryRunPreview.ProtectedFilesKept.length}{' '}
-                primary ROM/descriptor file(s) remain protected inside the archive. Reclaiming{' '}
-                <strong>{formatBytes(dryRunPreview.ReclaimedBytes)}</strong>.
-              </div>
-            )}
-
-            <div className="hk-field" style={{ marginBottom: 12 }}>
-              <label className="hk-field-label">Exact 7-Zip Command</label>
-              <input
-                type="text"
-                className="hk-input mono"
-                readOnly
-                value={dryRunPreview.CommandPreview}
-              />
-            </div>
-
-            <div className="hk-grid-2">
-              <div>
-                <strong style={{ color: 'var(--err)', fontSize: 12.5 }}>
-                  Extra Clutter to Remove ({dryRunPreview.FilesToDelete.length})
-                </strong>
-                <ul>
-                  {dryRunPreview.FilesToDelete.map((f) => (
-                    <li key={f.InternalPath} className="mono" style={{ fontSize: 11.5 }}>
-                      {f.InternalPath} ({formatBytes(f.SizeBytes)})
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <strong style={{ color: 'var(--ok)', fontSize: 12.5 }}>
-                  Protected Game Files Kept ({dryRunPreview.ProtectedFilesKept.length})
-                </strong>
-                <ul>
-                  {dryRunPreview.ProtectedFilesKept.map((f) => (
-                    <li key={f.InternalPath} className="mono" style={{ fontSize: 11.5 }}>
-                      {f.InternalPath} ({formatBytes(f.SizeBytes)})
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            </div>
-          </div>
-        )}
-      </ModalDialog>
+        onExecuteClean={(ids, paths) => void handleExecuteCleanExtra(ids, paths)}
+      />
 
       {/* Archive Templates Modal */}
       <ArchiveTemplateEditorDialog

@@ -136,7 +136,7 @@ namespace Housekeeping.Services
     /// multi-file disc/track/multi-disc sets (Redump CRC32 + MD5 + SHA1 on every file),
     /// and huge composite console folder dumps (PS3/PS4/PS5/Wii U/3DS/Xbox 360 using Scene .sfv / 7-Zip CRC32 per file).
     /// </summary>
-    public static class HashSidecarService
+    public static partial class HashSidecarService
     {
         private const int HashBufferSizeBytes = 262144; // 256 KB
         private static string? _cachedDefaultSevenZipExe;
@@ -546,8 +546,9 @@ namespace Housekeeping.Services
                 string content = File.ReadAllText(candidates[0]);
                 return TryParseSidecarDocument(content, Path.GetFileName(normalized), out doc);
             }
-            catch
+            catch (Exception ex)
             {
+                System.Diagnostics.Debug.WriteLine($"[HashSidecarService] TryReadExistingSidecarDocument skipped: {ex.Message}");
                 return false;
             }
         }
@@ -593,6 +594,10 @@ namespace Housekeeping.Services
                         doc.TitleOrFolder = line["# Title:".Length..].Trim();
                     else if (line.StartsWith("# DumpType:", StringComparison.OrdinalIgnoreCase))
                         doc.DumpType = line["# DumpType:".Length..].Trim();
+                    else if (line.StartsWith("# TotalFiles:", StringComparison.OrdinalIgnoreCase) &&
+                             int.TryParse(line["# TotalFiles:".Length..].Trim(), out int cTotalFiles) &&
+                             doc.TotalFiles <= 0)
+                        doc.TotalFiles = cTotalFiles;
                     else if (line.StartsWith("# Container:", StringComparison.OrdinalIgnoreCase))
                     {
                         foreach (string seg in line.Split('|', StringSplitOptions.TrimEntries))
@@ -789,6 +794,10 @@ namespace Housekeeping.Services
             {
                 if (string.IsNullOrWhiteSpace(doc.CompositeSha1))
                     return false;
+                if (doc.TotalFiles <= 0 && doc.Files.Count > 0)
+                    doc.TotalFiles = doc.Files.Count;
+                if (doc.TotalSizeBytes <= 0 && doc.Files.Count > 0)
+                    doc.TotalSizeBytes = doc.Files.Sum(f => f.Size);
                 document = doc;
                 return true;
             }
@@ -1198,10 +1207,10 @@ namespace Housekeeping.Services
                     return entries;
                 }
                 catch (OperationCanceledException) { throw; }
-                catch
+                catch (Exception zipEx)
                 {
+                    System.Diagnostics.Debug.WriteLine($"[HashSidecarService] ZipFile.OpenRead fallback to 7z: {zipEx.Message}");
                     entries.Clear();
-                    // Fall back to 7z.exe below (e.g., LZMA/Deflate64/non-standard zip headers)
                 }
             }
 
@@ -1411,250 +1420,6 @@ namespace Housekeeping.Services
             return doc?.GetPrimaryHashResult(Path.GetFileName(archivePath));
         }
 
-        public static async Task<bool> DeleteArchiveInternalHashFilesAsync(
-            string sevenZipExe,
-            string archivePath,
-            CancellationToken ct = default)
-        {
-            sevenZipExe = ResolveSevenZipExecutable(sevenZipExe);
-            if (!File.Exists(sevenZipExe) || !File.Exists(archivePath) || !IsWritableArchiveFilePath(archivePath))
-                return false;
-
-            try
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = sevenZipExe,
-                    Arguments = $"d \"{archivePath}\" *.hash -r",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false
-                };
-
-                using var p = System.Diagnostics.Process.Start(psi);
-                if (p == null) return false;
-                await p.WaitForExitAsync(ct);
-                return p.ExitCode == 0;
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        private static FileHashResult? FindMatchingSidecarEntry(
-            IReadOnlyList<FileHashResult> sidecarFiles,
-            string expectedNormalizedRelPath,
-            bool allowUniqueBasenameMatch)
-        {
-            string normalizedTarget = expectedNormalizedRelPath.Replace('\\', '/');
-            foreach (var f in sidecarFiles)
-            {
-                string candRel = (!string.IsNullOrWhiteSpace(f.RelativePath) ? f.RelativePath : f.FileName).Replace('\\', '/');
-                if (candRel.Equals(normalizedTarget, StringComparison.OrdinalIgnoreCase))
-                    return f;
-            }
-
-            if (allowUniqueBasenameMatch)
-            {
-                string expectedBase = Path.GetFileName(normalizedTarget);
-                var baseMatches = sidecarFiles
-                    .Where(f => Path.GetFileName((!string.IsNullOrWhiteSpace(f.RelativePath) ? f.RelativePath : f.FileName).Replace('\\', '/'))
-                        .Equals(expectedBase, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-
-                if (baseMatches.Count == 1)
-                    return baseMatches[0];
-            }
-
-            return null;
-        }
-
-        private static bool ValidateDocumentAgainstArchiveHeader(
-            ParsedSidecarDocument doc,
-            FileInfo archiveFile,
-            bool expectInnerRom,
-            ReleaseTopology topology,
-            IReadOnlyList<ArchiveEntryInfo> allEntries,
-            IReadOnlyList<(ArchiveEntryInfo Entry, string NormalizedRelativePath)> payloadEntries,
-            ArchiveEntryInfo? primaryEntry,
-            out SidecarVerificationStatus status,
-            out string detail)
-        {
-            if (!expectInnerRom)
-            {
-                if (doc.IsCompositeFolder || doc.Files.Count != 1)
-                {
-                    status = SidecarVerificationStatus.HeaderMismatch;
-                    detail = "Container-mode sidecar does not match single archive file format.";
-                    return false;
-                }
-
-                return ValidateSingleLooseFileSidecar(doc.Files[0], archiveFile, out status, out detail);
-            }
-
-            // Detect legacy outer-archive .hash (pre-RC3)
-            if (!doc.IsCompositeFolder &&
-                doc.Files.Count == 1 &&
-                IsLegacyOuterArchiveSidecar(doc.Files[0], archiveFile, primaryEntry))
-            {
-                string expectedDesc = topology == ReleaseTopology.CompositeFolderDump
-                    ? "inner folder dump"
-                    : (primaryEntry != null ? Path.GetFileName(primaryEntry.Path) : "inner ROM");
-                status = SidecarVerificationStatus.LegacyOuterArchiveHash;
-                detail = $"Legacy outer-archive hash detected (FILE: '{doc.Files[0].FileName}', SIZE: {doc.Files[0].Size} B) instead of '{expectedDesc}'.";
-                return false;
-            }
-
-            // Case 1: Archived Composite Folder Dump (e.g., PS3_GAME / PS4 / PS5 / Wii U inside .7z/.zip)
-            if (topology == ReleaseTopology.CompositeFolderDump)
-            {
-                string baseTitle = Path.GetFileNameWithoutExtension(archiveFile.Name);
-                var expectedComp = BuildCompositeHashFromArchiveEntries(baseTitle, archiveFile.FullName, allEntries);
-
-                if (!doc.IsCompositeFolder)
-                {
-                    status = SidecarVerificationStatus.IncompleteMultiFileSet;
-                    detail = $"Archived folder dump contains {expectedComp.TotalFiles} files, but sidecar only records {doc.Files.Count} file(s).";
-                    return false;
-                }
-
-                if (doc.TotalFiles != expectedComp.TotalFiles || doc.Files.Count != expectedComp.TotalFiles)
-                {
-                    status = SidecarVerificationStatus.IncompleteMultiFileSet;
-                    detail = $"Sidecar records {Math.Max(doc.TotalFiles, doc.Files.Count)} of {expectedComp.TotalFiles} files in archived folder dump.";
-                    return false;
-                }
-
-                if (!doc.AllEntriesHaveCrc32)
-                {
-                    status = SidecarVerificationStatus.IncompleteMultiFileSet;
-                    detail = "Folder dump sidecar ENTRY lines are missing per-file CRC32 checksums.";
-                    return false;
-                }
-
-                if (doc.TotalSizeBytes != expectedComp.TotalSizeBytes)
-                {
-                    status = SidecarVerificationStatus.HeaderMismatch;
-                    detail = $"Sidecar TOTAL_SIZE ({doc.TotalSizeBytes} B) != archive uncompressed folder size ({expectedComp.TotalSizeBytes} B).";
-                    return false;
-                }
-
-                if (!doc.CompositeSha1.Equals(expectedComp.CompositeSha1, StringComparison.OrdinalIgnoreCase))
-                {
-                    status = SidecarVerificationStatus.HeaderMismatch;
-                    detail = $"Sidecar COMPOSITE_SHA1 ({doc.CompositeSha1}) != 7-Zip header CRC32 tree ({expectedComp.CompositeSha1}).";
-                    return false;
-                }
-
-                status = SidecarVerificationStatus.Valid;
-                detail = $"Verified all {expectedComp.TotalFiles} files against 7-Zip header CRC32 manifest.";
-                return true;
-            }
-
-            // Case 2: Single-File or Multi-File ROM / Disc Set inside Archive
-            if (payloadEntries.Count == 0)
-            {
-                status = SidecarVerificationStatus.Error;
-                detail = "Archive contains no inner ROM payload entries.";
-                return false;
-            }
-
-            if (doc.IsCompositeFolder)
-            {
-                status = SidecarVerificationStatus.HeaderMismatch;
-                detail = "ROM archive has a folder-composite sidecar instead of per-file Redump SHA-1/MD5/CRC32 entries.";
-                return false;
-            }
-
-            if (payloadEntries.Count > 1 && doc.Files.Count < payloadEntries.Count)
-            {
-                bool uniqueBasenames = payloadEntries
-                    .Select(p => Path.GetFileName(p.NormalizedRelativePath))
-                    .Distinct(StringComparer.OrdinalIgnoreCase)
-                    .Count() == payloadEntries.Count;
-
-                var firstMissing = payloadEntries
-                    .FirstOrDefault(p => FindMatchingSidecarEntry(doc.Files, p.NormalizedRelativePath, uniqueBasenames) == null);
-                string missingLabel = firstMissing.Entry != null ? firstMissing.NormalizedRelativePath : "additional tracks";
-
-                status = SidecarVerificationStatus.IncompleteMultiFileSet;
-                detail = $"Sidecar only records {doc.Files.Count} of {payloadEntries.Count} payload files in archive (missing {payloadEntries.Count - doc.Files.Count} file(s), e.g. '{missingLabel}').";
-                return false;
-            }
-
-            if (doc.Files.Count != payloadEntries.Count)
-            {
-                status = SidecarVerificationStatus.HeaderMismatch;
-                detail = $"Sidecar file count ({doc.Files.Count}) does not match archive payload count ({payloadEntries.Count}).";
-                return false;
-            }
-
-            bool allowBasenameMatch = payloadEntries
-                .Select(p => Path.GetFileName(p.NormalizedRelativePath))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Count() == payloadEntries.Count;
-
-            foreach (var (entry, normRelPath) in payloadEntries)
-            {
-                var sc = FindMatchingSidecarEntry(doc.Files, normRelPath, allowBasenameMatch);
-                if (sc == null)
-                {
-                    status = payloadEntries.Count > 1
-                        ? SidecarVerificationStatus.IncompleteMultiFileSet
-                        : SidecarVerificationStatus.HeaderMismatch;
-                    detail = $"Sidecar is missing inner ROM file '{normRelPath}'.";
-                    return false;
-                }
-
-                if (sc.Size != entry.Size)
-                {
-                    status = SidecarVerificationStatus.HeaderMismatch;
-                    detail = $"Sidecar SIZE ({sc.Size} B) for '{normRelPath}' != archive uncompressed size ({entry.Size} B).";
-                    return false;
-                }
-
-                string expectedCrc = string.IsNullOrWhiteSpace(entry.Crc) && entry.Size == 0
-                    ? "00000000"
-                    : entry.Crc;
-
-                if (!string.IsNullOrWhiteSpace(expectedCrc))
-                {
-                    if (string.IsNullOrWhiteSpace(sc.Crc32))
-                    {
-                        status = SidecarVerificationStatus.HeaderMismatch;
-                        detail = $"Sidecar entry '{normRelPath}' is missing CRC32 (archive header expects {expectedCrc}).";
-                        return false;
-                    }
-
-                    if (!sc.Crc32.Equals(expectedCrc, StringComparison.OrdinalIgnoreCase))
-                    {
-                        status = SidecarVerificationStatus.HeaderMismatch;
-                        detail = $"Sidecar CRC32 ({sc.Crc32}) for '{normRelPath}' != archive header CRC32 ({expectedCrc}).";
-                        return false;
-                    }
-                }
-
-                if (string.IsNullOrWhiteSpace(sc.Sha1))
-                {
-                    status = SidecarVerificationStatus.HeaderMismatch;
-                    detail = $"Sidecar entry '{normRelPath}' is missing SHA1 checksum.";
-                    return false;
-                }
-            }
-
-            status = SidecarVerificationStatus.Valid;
-            detail = payloadEntries.Count > 1
-                ? $"Verified all {payloadEntries.Count} inner ROM/track files against 7-Zip header."
-                : "Verified against inner ROM 7-Zip header.";
-            return true;
-        }
-
         private static bool ValidateSingleLooseFileSidecar(
             FileHashResult sc,
             FileInfo targetFile,
@@ -1849,7 +1614,7 @@ namespace Housekeeping.Services
                                 Sha1 = comp.CompositeSha1
                             };
 
-                            if (!folderDoc.CompositeSha1.Equals(comp.CompositeSha1, StringComparison.OrdinalIgnoreCase))
+                            if (!CompositeSha1MatchesEitherConvention(folderDoc.CompositeSha1, comp))
                             {
                                 res.Status = SidecarVerificationStatus.CryptographicMismatch;
                                 res.DetailMessage = $"Folder COMPOSITE_SHA1 ({folderDoc.CompositeSha1}) != computed CRC32 tree ({comp.CompositeSha1}).";
@@ -2158,24 +1923,6 @@ namespace Housekeeping.Services
             }
         }
 
-        public static string SerializeParsedSidecarDocument(string baseTitle, ParsedSidecarDocument doc)
-        {
-            if (doc.IsCompositeFolder)
-            {
-                return GenerateSidecarContentForFolder(new FolderCompositeHashResult
-                {
-                    FolderName = string.IsNullOrWhiteSpace(doc.TitleOrFolder) ? baseTitle : doc.TitleOrFolder,
-                    DumpType = doc.DumpType,
-                    TotalFiles = doc.TotalFiles > 0 ? doc.TotalFiles : doc.Files.Count,
-                    TotalSizeBytes = doc.TotalSizeBytes,
-                    CompositeSha1 = doc.CompositeSha1,
-                    Files = doc.Files
-                });
-            }
-
-            return GenerateSidecarContentForFiles(baseTitle, doc.Files);
-        }
-
         public static async Task<FileHashResult?> HealTargetSidecarAsync(
             string sevenZipExe,
             string targetPath,
@@ -2184,12 +1931,14 @@ namespace Housekeeping.Services
             string scratchDir = "",
             SidecarItemVerificationResult? priorVerification = null,
             AuditStructureMode structureMode = AuditStructureMode.Auto,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool syncPostInjectionContainerHashJson = true,
+            bool cleanDisallowedHashFilesOnMigrate = false)
         {
             sevenZipExe = ResolveSevenZipExecutable(sevenZipExe);
             string normalized = NormalizeTargetPath(targetPath);
 
-            // ==================== UNPACKED GAME FOLDERS (ALWAYS PLACE .hash BESIDE FOLDER) ====================
+            // ==================== UNPACKED GAME FOLDERS (ALWAYS PLACE .hash BESIDE FOLDER UNLESS DATABASE ONLY) ====================
             if (Directory.Exists(normalized))
             {
                 var di = new DirectoryInfo(normalized);
@@ -2199,11 +1948,18 @@ namespace Housekeeping.Services
 
                 CleanupStrayInternalFolderHashFiles(normalized);
 
+                if (placementMode == HashSidecarMode.DatabaseOnly && cleanDisallowedHashFilesOnMigrate)
+                {
+                    foreach (var extSidecar in GetExistingExternalSidecarPaths(normalized))
+                        NetworkSafetyService.TryDeleteFile(extSidecar);
+                }
+
                 if (ReleaseStructureDetector.ShouldTreatAsCompositeDump(normalized, structureMode))
                 {
                     var comp = priorVerification?.ComputedComposite
                                ?? await ComputeFolderCompositeHashAsync(normalized, ct);
-                    await CreateFolderSidecarFileAsync(parentDir, comp, ct);
+                    if (placementMode != HashSidecarMode.DatabaseOnly)
+                        await CreateFolderSidecarFileAsync(parentDir, comp, ct);
                     return new FileHashResult
                     {
                         FileName = di.Name,
@@ -2221,7 +1977,8 @@ namespace Housekeeping.Services
                     if (folderFiles.Count == 0)
                         return null;
 
-                    await CreateOrUpdateSidecarFileAsync(parentDir, di.Name, folderFiles, ct);
+                    if (placementMode != HashSidecarMode.DatabaseOnly)
+                        await CreateOrUpdateSidecarFileAsync(parentDir, di.Name, folderFiles, ct);
                     return folderFiles
                         .OrderByDescending(f => !ReleaseStructureDetector.IsDiscDescriptorFile(f.FileName))
                         .ThenByDescending(f => f.Size)
@@ -2237,6 +1994,16 @@ namespace Housekeeping.Services
             bool isArchive = IsArchiveFilePath(fi.FullName);
             bool isWritableArchive = IsWritableArchiveFilePath(fi.FullName);
             string baseTitle = Path.GetFileNameWithoutExtension(fi.Name);
+
+            FileHashResult? outerContainerHash = null;
+            if (isArchive && expectInnerRom)
+            {
+                var priorDoc = priorVerification?.ParsedDocument;
+                if (priorDoc != null && priorDoc.HasContainerHash && priorDoc.ContainerSize == fi.Length)
+                    outerContainerHash = ReconstructContainerHashFromDocument(priorDoc, fi.Name);
+                else
+                    outerContainerHash = await ComputeFileHashesAsync(fi.FullName, ct);
+            }
 
             string sidecarContent;
             FileHashResult primaryResult;
@@ -2271,7 +2038,6 @@ namespace Housekeeping.Services
                     }
                     else
                     {
-                        // Reuse already header-CRC-verified entries ONLY during IncompleteMultiFileSet upgrades
                         var reusable = priorVerification?.Status == SidecarVerificationStatus.IncompleteMultiFileSet
                             ? priorVerification.SidecarFiles
                             : null;
@@ -2287,7 +2053,7 @@ namespace Housekeeping.Services
                     if (allFiles.Count == 0)
                         return null;
 
-                    sidecarContent = GenerateSidecarContentForFiles(baseTitle, allFiles);
+                    sidecarContent = GenerateSidecarContentForFiles(baseTitle, allFiles, outerContainerHash);
                     primaryResult = allFiles
                         .OrderByDescending(f => !ReleaseStructureDetector.IsDiscDescriptorFile(f.FileName))
                         .ThenByDescending(f => f.Size)
@@ -2300,8 +2066,19 @@ namespace Housekeeping.Services
                     ? priorVerification.ComputedHash
                     : await ComputeFileHashesAsync(fi.FullName, ct);
 
-                sidecarContent = GenerateSidecarContentForFiles(baseTitle, new[] { singleHash });
+                sidecarContent = GenerateSidecarContentForFiles(baseTitle, new[] { singleHash }, isArchive ? singleHash : null);
                 primaryResult = singleHash;
+            }
+
+            if (placementMode == HashSidecarMode.DatabaseOnly && cleanDisallowedHashFilesOnMigrate)
+            {
+                foreach (var extSidecar in GetExistingExternalSidecarPaths(fi.FullName))
+                    NetworkSafetyService.TryDeleteFile(extSidecar);
+                if (isWritableArchive)
+                    await DeleteArchiveInternalHashFilesAsync(sevenZipExe, fi.FullName, ct, syncPostInjectionContainerHashJson);
+                if (isArchive && syncPostInjectionContainerHashJson)
+                    await UpsertPostMutationArchiveHashAsync(fi.FullName, false, "", primaryResult, HashSidecarMode.DatabaseOnly, ct);
+                return primaryResult;
             }
 
             HashSidecarMode effectiveMode = placementMode;
@@ -2312,13 +2089,30 @@ namespace Housekeeping.Services
                     : HashSidecarMode.SidecarBeside;
             }
 
-            if (effectiveMode == HashSidecarMode.PackageInsideArchive && isWritableArchive)
+            bool writeExternal = effectiveMode is HashSidecarMode.SidecarBeside or HashSidecarMode.SidecarAndArchive || !isWritableArchive;
+            bool writeInternal = effectiveMode is HashSidecarMode.PackageInsideArchive or HashSidecarMode.SidecarAndArchive && isWritableArchive;
+
+            if (writeExternal)
+            {
+                if (!writeInternal && isWritableArchive &&
+                    priorVerification != null &&
+                    (cleanDisallowedHashFilesOnMigrate || priorVerification.Status != SidecarVerificationStatus.Valid) &&
+                    (priorVerification.Location == SidecarLocation.InternalArchive || priorVerification.Location == SidecarLocation.Both))
+                {
+                    await DeleteArchiveInternalHashFilesAsync(sevenZipExe, fi.FullName, ct, syncPostInjectionContainerHashJson);
+                }
+
+                string standardPath = GetStandardSidecarPath(fi.FullName);
+                await File.WriteAllTextAsync(standardPath, sidecarContent, SidecarUtf8NoBom, ct);
+            }
+
+            if (writeInternal)
             {
                 if (priorVerification == null ||
                     priorVerification.Location == SidecarLocation.InternalArchive ||
                     priorVerification.Location == SidecarLocation.Both)
                 {
-                    await DeleteArchiveInternalHashFilesAsync(sevenZipExe, fi.FullName, ct);
+                    await DeleteArchiveInternalHashFilesAsync(sevenZipExe, fi.FullName, ct, syncPostMutationContainerHashJson: false);
                 }
 
                 string tempDir = Path.Combine(Path.GetTempPath(), "hk_hash_" + Guid.NewGuid().ToString("N"));
@@ -2326,34 +2120,18 @@ namespace Housekeeping.Services
                 string tempSidecar = Path.Combine(tempDir, $"{baseTitle}.hash");
                 try
                 {
-                    await File.WriteAllTextAsync(tempSidecar, sidecarContent, Encoding.UTF8, ct);
-                    bool injected = await InjectSidecarIntoArchiveAsync(sevenZipExe, fi.FullName, tempSidecar, ct);
-                    if (injected)
+                    await File.WriteAllTextAsync(tempSidecar, sidecarContent, SidecarUtf8NoBom, ct);
+                    bool injected = await InjectSidecarIntoArchiveAsync(sevenZipExe, fi.FullName, tempSidecar, ct, syncPostInjectionContainerHashJson);
+                    if (injected && !writeExternal)
                     {
-                        // Always remove any external .hash files (<Game>.7z.hash and <Game>.hash) when packed inside archive
                         foreach (var extSidecar in GetExistingExternalSidecarPaths(fi.FullName))
-                        {
-                            try { File.Delete(extSidecar); } catch (System.Exception __suppressedEx9) { System.Diagnostics.Debug.WriteLine($"[HashSidecarService] Non-fatal error ignored: {__suppressedEx9.Message}"); }
-                        }
+                            NetworkSafetyService.TryDeleteFile(extSidecar);
                     }
                 }
                 finally
                 {
                     try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch (System.Exception __suppressedEx10) { System.Diagnostics.Debug.WriteLine($"[HashSidecarService] Non-fatal error ignored: {__suppressedEx10.Message}"); }
                 }
-            }
-            else
-            {
-                if (isWritableArchive &&
-                    priorVerification != null &&
-                    priorVerification.Status != SidecarVerificationStatus.Valid &&
-                    (priorVerification.Location == SidecarLocation.InternalArchive || priorVerification.Location == SidecarLocation.Both))
-                {
-                    await DeleteArchiveInternalHashFilesAsync(sevenZipExe, fi.FullName, ct);
-                }
-
-                string standardPath = GetStandardSidecarPath(fi.FullName);
-                await File.WriteAllTextAsync(standardPath, sidecarContent, Encoding.UTF8, ct);
             }
 
             return primaryResult;
@@ -2387,7 +2165,7 @@ namespace Housekeeping.Services
                 {
                     foreach (var f in currentDir.EnumerateFiles("*", topOpts))
                     {
-                        if (f.Length <= 0 || f.Name.Contains(".partial.", StringComparison.OrdinalIgnoreCase))
+                        if (f.Length <= 0 || NetworkSafetyService.IsPartialOrTransientArtifact(f.Name))
                             continue;
 
                         if (IsArchiveFilePath(f.FullName))
@@ -2504,47 +2282,11 @@ namespace Housekeeping.Services
                         {
                             CleanupStrayInternalFolderHashFiles(target);
                         }
-                        else if (healEnabled &&
-                                 targetPlacement == HashSidecarMode.PackageInsideArchive &&
-                                 IsWritableArchiveFilePath(target) &&
-                                 itemRes.ParsedDocument != null &&
-                                 itemRes.Location != SidecarLocation.InternalArchive)
+                        else if (healEnabled && !isDirTarget &&
+                                 await MigrateValidArchiveSidecarPlacementAsync(sevenZipExe, target, targetPlacement, itemRes, log, ct))
                         {
-                            if (itemRes.Location == SidecarLocation.ExternalBeside)
-                            {
-                                string baseTitle = Path.GetFileNameWithoutExtension(target);
-                                string content = SerializeParsedSidecarDocument(baseTitle, itemRes.ParsedDocument);
-                                string tempDir = Path.Combine(Path.GetTempPath(), "hk_hash_" + Guid.NewGuid().ToString("N"));
-                                Directory.CreateDirectory(tempDir);
-                                string tempSidecar = Path.Combine(tempDir, $"{baseTitle}.hash");
-                                try
-                                {
-                                    await File.WriteAllTextAsync(tempSidecar, content, Encoding.UTF8, ct);
-                                    if (await InjectSidecarIntoArchiveAsync(sevenZipExe, target, tempSidecar, ct))
-                                    {
-                                        foreach (var extPath in GetExistingExternalSidecarPaths(target))
-                                        {
-                                            try { File.Delete(extPath); } catch (System.Exception __suppressedEx13) { System.Diagnostics.Debug.WriteLine($"[HashSidecarService] Non-fatal error ignored: {__suppressedEx13.Message}"); }
-                                        }
-                                        itemRes.WasHealed = true;
-                                        report.HealedCount++;
-                                        log?.Invoke("SUCCESS", $"[Migrated -> Inside Archive] '{shortName}' (valid .hash packaged & external sidecar removed)");
-                                    }
-                                }
-                                finally
-                                {
-                                    try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch (System.Exception __suppressedEx14) { System.Diagnostics.Debug.WriteLine($"[HashSidecarService] Non-fatal error ignored: {__suppressedEx14.Message}"); }
-                                }
-                            }
-                            else if (itemRes.Location == SidecarLocation.Both)
-                            {
-                                foreach (var extPath in GetExistingExternalSidecarPaths(target))
-                                {
-                                    try { File.Delete(extPath); } catch (System.Exception __suppressedEx15) { System.Diagnostics.Debug.WriteLine($"[HashSidecarService] Non-fatal error ignored: {__suppressedEx15.Message}"); }
-                                }
-                                itemRes.WasHealed = true;
-                                report.HealedCount++;
-                            }
+                            itemRes.WasHealed = true;
+                            report.HealedCount++;
                         }
                         break;
 
@@ -2758,9 +2500,9 @@ namespace Housekeeping.Services
                 {
                     throw;
                 }
-                catch
+                catch (Exception zipFallbackEx)
                 {
-                    // Fall through to 7z extraction if ZIP uses unsupported compression method (e.g. LZMA/Deflate64 in .zip)
+                    System.Diagnostics.Debug.WriteLine($"[HashSidecarService] Zip stream fallback to 7z: {zipFallbackEx.Message}");
                 }
             }
 
@@ -2943,43 +2685,6 @@ namespace Housekeeping.Services
                 .OrderByDescending(f => !ReleaseStructureDetector.IsDiscDescriptorFile(f.FileName))
                 .ThenByDescending(f => f.Size)
                 .First();
-        }
-
-        public static async Task<bool> InjectSidecarIntoArchiveAsync(
-            string sevenZipExe,
-            string archivePath,
-            string sidecarFilePath,
-            CancellationToken ct = default)
-        {
-            sevenZipExe = ResolveSevenZipExecutable(sevenZipExe);
-            if (!File.Exists(sevenZipExe) || !File.Exists(archivePath) || !File.Exists(sidecarFilePath))
-                return false;
-
-            try
-            {
-                string sidecarDir = Path.GetDirectoryName(sidecarFilePath) ?? "";
-                string sidecarFileName = Path.GetFileName(sidecarFilePath);
-
-                var psi = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = sevenZipExe,
-                    Arguments = $"a \"{archivePath}\" \"{sidecarFileName}\"",
-                    WorkingDirectory = string.IsNullOrEmpty(sidecarDir) ? null : sidecarDir,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false
-                };
-
-                using var p = System.Diagnostics.Process.Start(psi);
-                if (p == null) return false;
-                await p.WaitForExitAsync(ct);
-                return p.ExitCode == 0;
-            }
-            catch
-            {
-                return false;
-            }
         }
 
         public static async Task<string> CreateOrUpdateSidecarFileAsync(

@@ -90,7 +90,7 @@ namespace Housekeeping.Services
         public Dictionary<string, JobLiveStatusDto> JobStates { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
-    public sealed class PipelineOrchestratorService : IDisposable
+    public sealed partial class PipelineOrchestratorService : IDisposable
     {
         private readonly ConfigService _configService;
         private readonly TerminalLogBufferService _logBuffer;
@@ -600,95 +600,6 @@ namespace Housekeeping.Services
             BroadcastState();
         }
 
-        private static InterruptedRunCheckpoint? CloneCheckpoint(InterruptedRunCheckpoint? src)
-        {
-            if (src == null) return null;
-            return new InterruptedRunCheckpoint
-            {
-                RunKind = src.RunKind,
-                QueueId = src.QueueId,
-                QueueName = src.QueueName,
-                InitialJobIds = new List<string>(src.InitialJobIds),
-                CompletedJobIds = new List<string>(src.CompletedJobIds),
-                ActiveJobId = src.ActiveJobId,
-                ActiveJobName = src.ActiveJobName,
-                PendingChainedQueueIds = new List<string>(src.PendingChainedQueueIds),
-                PendingRuns = (src.PendingRuns ?? new List<PendingPipelineRunDto>()).Select(ClonePendingRun).ToList(),
-                IsDryRun = src.IsDryRun,
-                ForceCloudResync = src.ForceCloudResync,
-                VerifierSourceModule = src.VerifierSourceModule,
-                VerifierMode = src.VerifierMode,
-                LastProgressPercent = src.LastProgressPercent,
-                LastStatusText = src.LastStatusText,
-                StartedAtUtc = src.StartedAtUtc,
-                UpdatedAtUtc = src.UpdatedAtUtc
-            };
-        }
-
-        private void LoadInterruptedCheckpointOnStartup()
-        {
-            try
-            {
-                string path = InterruptedCheckpointFilePath;
-                if (!File.Exists(path)) return;
-                string json = File.ReadAllText(path, Encoding.UTF8);
-                var loaded = JsonSerializer.Deserialize<InterruptedRunCheckpoint>(json, ConfigService.JsonOptions);
-                if (loaded != null && !string.IsNullOrWhiteSpace(loaded.RunKind))
-                {
-                    lock (_stateLock)
-                    {
-                        _recoverableInterruptedRun = loaded;
-                    }
-                    Log("WARN", $"[Recovery] Detected interrupted mid-shutdown run: '{loaded.QueueName ?? loaded.ActiveJobName ?? loaded.RunKind}' ({loaded.LastProgressPercent:F0}% — {loaded.LastStatusText}). Ready to resume.");
-                }
-            }
-            catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx2.Message}"); }
-        }
-
-        private void PersistActiveCheckpointToDisk()
-        {
-            InterruptedRunCheckpoint? copy;
-            lock (_stateLock)
-            {
-                if (_activeCheckpoint == null) return;
-                _activeCheckpoint.UpdatedAtUtc = DateTime.UtcNow;
-                _activeCheckpoint.PendingRuns = _pendingRuns.Select(ClonePendingRun).ToList();
-                _activeCheckpoint.PendingChainedQueueIds = ExtractPendingQueueIdsLocked();
-                copy = CloneCheckpoint(_activeCheckpoint);
-            }
-
-            if (copy == null) return;
-            try
-            {
-                string json = JsonSerializer.Serialize(copy, ConfigService.JsonOptions);
-                ConfigService.AtomicWriteAllText(InterruptedCheckpointFilePath, json);
-            }
-            catch (System.Exception __suppressedEx3) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx3.Message}"); }
-        }
-
-        private void ClearInterruptedCheckpoint()
-        {
-            lock (_stateLock)
-            {
-                _activeCheckpoint = null;
-                _recoverableInterruptedRun = null;
-            }
-            try
-            {
-                string path = InterruptedCheckpointFilePath;
-                if (File.Exists(path))
-                    File.Delete(path);
-            }
-            catch (System.Exception __suppressedEx4) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx4.Message}"); }
-        }
-
-        public void DismissInterruptedRun()
-        {
-            ClearInterruptedCheckpoint();
-            Log("INFO", "[Recovery] Cleared interrupted run checkpoint.");
-            BroadcastState();
-        }
-
         public (bool Started, string Message) ResumeInterruptedRun(bool restartFullQueue = false)
         {
             InterruptedRunCheckpoint? cp;
@@ -1150,7 +1061,9 @@ namespace Housekeeping.Services
                     BroadcastState();
 
                     ct.ThrowIfCancellationRequested();
-                    await WaitIfQueuePausedAsync(ct).ConfigureAwait(false);
+                    using var linkedJobCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    lock (_stateLock) { _activeJobCts = linkedJobCts; }
+                    var jobCt = linkedJobCts.Token;
 
                     int totalPlannedNow;
                     lock (_stateLock) { totalPlannedNow = _totalJobs; }
@@ -1161,7 +1074,7 @@ namespace Housekeeping.Services
                     _ = _scheduler.NotifyJobStartedAsync(job.Name, job.ModuleTypeBadgeText, queueName);
                     Log("HEADER", $"--- Job: {job.Name} ({job.ModuleTypeBadgeText}) ---");
 
-                    // Snapshot manifest file fingerprints before Module 4 or Module 8 runs
+                    // Snapshot manifest file fingerprints before Module 8 runs
                     var preManifestFingerprints = CaptureCandidateManifestFingerprints(job);
 
                     ModuleExecutionContext? ctx = null;
@@ -1224,43 +1137,50 @@ namespace Housekeeping.Services
                     bool jobCompletedCleanly = false;
                     try
                     {
+                        await WaitIfQueuePausedAsync(jobCt).ConfigureAwait(false);
                         if (CustomModuleExecutor != null)
                         {
-                            await CustomModuleExecutor(ctx, ct).ConfigureAwait(false);
+                            await CustomModuleExecutor(ctx, jobCt).ConfigureAwait(false);
                         }
                         else
                         {
                             switch (job.ModuleType)
                             {
                                 case ModuleId.ProxyGenerator:
-                                    await ProxyGeneratorModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await ProxyGeneratorModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.ArchiveCompressor:
-                                    await ArchiveCompressorModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await ArchiveCompressorModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.MediaTranscoder:
-                                    await MediaTranscoderModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await MediaTranscoderModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.RomLauncherGenerator:
-                                    await RomLauncherGeneratorModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await RomLauncherGeneratorModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.CloudSync:
-                                    await CloudSyncModule.RunAsync(ctx, forceCloudResync, ct).ConfigureAwait(false);
+                                    await CloudSyncModule.RunAsync(ctx, forceCloudResync, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.HumbleSync:
-                                    await HumbleSyncModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await HumbleSyncModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.CustomScripts:
-                                    await CustomScriptsModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await CustomScriptsModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                                 case ModuleId.CollectionManifest:
-                                    await CollectionManifestModule.RunAsync(ctx, ct).ConfigureAwait(false);
+                                    await CollectionManifestModule.RunAsync(ctx, jobCt).ConfigureAwait(false);
                                     break;
                             }
                         }
-                        jobCompletedCleanly = !ct.IsCancellationRequested;
+                        jobCompletedCleanly = !jobCt.IsCancellationRequested;
                     }
-                    catch (Exception ex) when (!ct.IsCancellationRequested)
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        if (executionQueue.Count == 0 && initialJobs.Count == 1)
+                            runStatus = "Cancelled";
+                        Log("WARN", $"[Stop Job] Job '{job.Name}' cancelled — advancing queue ({executionQueue.Count} remaining in active queue)...");
+                    }
+                    catch (Exception ex) when (!jobCt.IsCancellationRequested && !ct.IsCancellationRequested)
                     {
                         _ = _scheduler.NotifyErrorAsync(job.Name, ex.Message);
                         throw;
@@ -1275,14 +1195,17 @@ namespace Housekeeping.Services
 
                         lock (_stateLock)
                         {
+                            if (ReferenceEquals(_activeJobCts, linkedJobCts))
+                                _activeJobCts = null;
                             if (_jobStates.TryGetValue(job.JobId, out var js))
                             {
                                 js.Processed = ctx.Stats.Processed;
                                 js.Skipped = ctx.Stats.Skipped;
                                 js.Errors = ctx.Stats.Errors;
-                                if (ct.IsCancellationRequested)
+                                if (jobCt.IsCancellationRequested || ct.IsCancellationRequested)
                                 {
                                     js.State = "Cancelled";
+                                    js.DetailText = "Cancelled by user";
                                 }
                                 else
                                 {
@@ -1310,11 +1233,11 @@ namespace Housekeeping.Services
 
                     // 1. Post-Manifest Greenroom Auto-Sync (only when manifest files actually changed!)
                     if (jobCompletedCleanly && !isDryRun &&
-                        (job.ModuleType == ModuleId.RomLauncherGenerator || job.ModuleType == ModuleId.CollectionManifest))
+                        (job.ModuleType == ModuleId.CollectionManifest || job.ModuleType == ModuleId.RomLauncherGenerator))
                     {
-                        bool perJobSyncEnabled = job.ModuleType == ModuleId.RomLauncherGenerator
-                            ? (job.RomLauncherGenerator ?? immutableRunConfig.RomLauncherGenerator).AutoSyncGreenroomOnManifestChange
-                            : (job.CollectionManifest ?? immutableRunConfig.CollectionManifest).AutoSyncGreenroomOnManifestChange;
+                        bool perJobSyncEnabled = job.ModuleType == ModuleId.CollectionManifest
+                            ? (job.CollectionManifest ?? immutableRunConfig.CollectionManifest).AutoSyncGreenroomOnManifestChange
+                            : (job.RomLauncherGenerator ?? immutableRunConfig.RomLauncherGenerator).AutoSyncGreenroomOnManifestChange;
 
                         if (perJobSyncEnabled)
                         {
@@ -1512,25 +1435,7 @@ namespace Housekeeping.Services
             {
                 var candidates = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                if (job.ModuleType == ModuleId.RomLauncherGenerator)
-                {
-                    var rom = job.RomLauncherGenerator ?? _configService.Config.RomLauncherGenerator;
-                    string csvName = string.IsNullOrWhiteSpace(rom.ManifestCsvFileName) ? "collection_manifest.csv" : rom.ManifestCsvFileName;
-                    if (!string.IsNullOrWhiteSpace(rom.LaunchersOutputRootPath))
-                    {
-                        candidates.Add(Path.Combine(rom.LaunchersOutputRootPath, csvName));
-                    }
-                    foreach (var col in rom.Collections.Where(c => c.Enabled && !string.IsNullOrWhiteSpace(c.ArchivesPath)))
-                    {
-                        candidates.Add(Path.Combine(col.ArchivesPath, csvName));
-                    }
-                    if (rom.EnableSecondaryManifestStorage && !string.IsNullOrWhiteSpace(rom.SecondaryManifestDirectory) && Directory.Exists(rom.SecondaryManifestDirectory))
-                    {
-                        foreach (var f in Directory.GetFiles(rom.SecondaryManifestDirectory, "*.csv", SearchOption.TopDirectoryOnly))
-                            candidates.Add(f);
-                    }
-                }
-                else if (job.ModuleType == ModuleId.CollectionManifest)
+                if (job.ModuleType == ModuleId.CollectionManifest)
                 {
                     var man = job.CollectionManifest ?? _configService.Config.CollectionManifest;
                     string outDir = string.IsNullOrWhiteSpace(man.UnifiedManifestOutputFolder)
@@ -1544,7 +1449,9 @@ namespace Housekeeping.Services
                         foreach (var f in Directory.GetFiles(outDir, "*.*", SearchOption.TopDirectoryOnly))
                         {
                             string ext = Path.GetExtension(f);
-                            if (ext.Equals(".csv", StringComparison.OrdinalIgnoreCase) || ext.Equals(".json", StringComparison.OrdinalIgnoreCase))
+                            if (ext.Equals(".csv", StringComparison.OrdinalIgnoreCase) ||
+                                ext.Equals(".tsv", StringComparison.OrdinalIgnoreCase) ||
+                                ext.Equals(".json", StringComparison.OrdinalIgnoreCase))
                                 candidates.Add(f);
                         }
                     }
@@ -1553,10 +1460,16 @@ namespace Housekeeping.Services
                     {
                         if (Directory.Exists(tf.FolderPath))
                         {
-                            foreach (var f in Directory.GetFiles(tf.FolderPath, "*Manifest*.csv", SearchOption.TopDirectoryOnly))
+                            foreach (var f in Directory.GetFiles(tf.FolderPath, "*Manifest*.*", SearchOption.TopDirectoryOnly))
                                 candidates.Add(f);
                         }
                     }
+                }
+                else if (job.ModuleType == ModuleId.RomLauncherGenerator)
+                {
+                    var rom = job.RomLauncherGenerator ?? _configService.Config.RomLauncherGenerator;
+                    if (!string.IsNullOrWhiteSpace(rom.LaunchersOutputRootPath) && !string.IsNullOrWhiteSpace(rom.ManifestCsvFileName))
+                        candidates.Add(Path.Combine(rom.LaunchersOutputRootPath, rom.ManifestCsvFileName));
                 }
 
                 foreach (string path in candidates)
@@ -1590,75 +1503,6 @@ namespace Housekeeping.Services
                 }
             }
             return changed;
-        }
-
-        public bool TogglePause()
-        {
-            bool paused;
-            lock (_stateLock)
-            {
-                if (!_isRunning) return false;
-                _isPaused = !_isPaused;
-                paused = _isPaused;
-            }
-            Log(paused ? "WARN" : "INFO", paused ? "[Queue Paused] Current step will pause cleanly at the next checkpoint." : "[Queue Resumed] Execution continuing.");
-            BroadcastState();
-            return paused;
-        }
-
-        public bool ToggleSuspendProcess()
-        {
-            _processRunner.ToggleSuspendActiveProcess();
-            BroadcastState();
-            return _processRunner.IsSuspended;
-        }
-
-        private void FinalizeCheckpointAfterRun(bool cancelledOrDisposed)
-        {
-            bool preserve;
-            lock (_stateLock)
-            {
-                preserve = cancelledOrDisposed && !_userRequestedExplicitStop && _activeCheckpoint != null;
-            }
-
-            if (preserve)
-            {
-                PersistActiveCheckpointToDisk();
-                lock (_stateLock)
-                {
-                    _recoverableInterruptedRun = CloneCheckpoint(_activeCheckpoint);
-                    _activeCheckpoint = null;
-                }
-            }
-            else
-            {
-                ClearInterruptedCheckpoint();
-            }
-        }
-
-        public void StopActiveRun()
-        {
-            CancellationTokenSource? cts;
-            int clearedPending;
-            lock (_stateLock)
-            {
-                _userRequestedExplicitStop = true;
-                clearedPending = _pendingRuns.Count;
-                _pendingRuns.Clear();
-                cts = _activeRunCts;
-            }
-            if (cts != null)
-            {
-                string suffix = clearedPending > 0 ? $" (also cleared {clearedPending} pending Up Next run(s))" : "";
-                Log("WARN", $"Stop requested — signalling active subprocesses and pipeline to halt{suffix}...");
-                try { cts.Cancel(); } catch (System.Exception __suppressedEx9) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx9.Message}"); }
-                BroadcastState();
-            }
-            else if (clearedPending > 0)
-            {
-                Log("WARN", $"Stop requested — cleared {clearedPending} pending Up Next run(s).");
-                BroadcastState();
-            }
         }
 
         public async Task<int> RetryPendingSwapsAsync()
@@ -2314,15 +2158,6 @@ namespace Housekeeping.Services
                 });
             }
             catch (System.Exception __suppressedEx12) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx12.Message}"); }
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _disposed = true;
-            PersistActiveCheckpointToDisk();
-            try { _scheduleTimer?.Dispose(); } catch (System.Exception __suppressedEx13) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx13.Message}"); }
-            try { _activeRunCts?.Cancel(); } catch (System.Exception __suppressedEx14) { System.Diagnostics.Debug.WriteLine($"[PipelineOrchestratorService] Non-fatal error ignored: {__suppressedEx14.Message}"); }
         }
     }
 }

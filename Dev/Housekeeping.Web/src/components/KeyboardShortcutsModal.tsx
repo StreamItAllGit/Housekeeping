@@ -24,6 +24,7 @@ export const KeyboardShortcutsModal: React.FC<KeyboardShortcutsModalProps> = ({ 
       title: 'Global Controls & Tools',
       items: [
         { keys: ['Ctrl', 'K'], desc: 'Open Global Omni-Search' },
+        { keys: ['Ctrl', 'B'], desc: 'Toggle Left Navigation Sidebar Rail' },
         { keys: ['Ctrl', 'S'], desc: 'Flush & save configuration snapshot now' },
         { keys: ['Ctrl', '`'], desc: 'Toggle Global Terminal Drawer' },
         { keys: ['?'], desc: 'Open this keyboard shortcuts cheat-sheet' },

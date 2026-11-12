@@ -18,7 +18,7 @@ public sealed record EmbeddedMetadata(
     string PayloadSha256,
     int FileCount);
 
-public static class Program
+public static partial class Program
 {
     private const string PayloadResourceName = "Housekeeping.Installer.Embedded.payload.zip";
     private const string MetadataResourceName = "Housekeeping.Installer.Embedded.metadata.json";
@@ -439,7 +439,8 @@ public static class Program
         {
             foreach (var proc in matchedProcesses)
             {
-                try { proc.Dispose(); } catch { }
+                try { proc.Dispose(); }
+                catch (Exception ex) { Debug.WriteLine($"[Housekeeping.Installer] Process dispose ignored: {ex.Message}"); }
             }
         }
 
@@ -449,7 +450,11 @@ public static class Program
     private static bool SafeHasExited(Process proc)
     {
         try { return proc.HasExited; }
-        catch { return true; }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[Housekeeping.Installer] SafeHasExited ignored: {ex.Message}");
+            return true;
+        }
     }
 
     private static int ResolveConfiguredServerPort(string installDir)
@@ -500,351 +505,6 @@ public static class Program
         {
             Debug.WriteLine($"[Housekeeping.Installer] HTTP shutdown probe ignored: {ex.Message}");
         }
-    }
-
-    public static void MigrateLegacyUserState(string installDir, string? logDir)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir))
-                return;
-
-            string dataDir = Path.Combine(installDir, "data");
-            string logsSubDir = Path.Combine(installDir, "logs");
-            string backupsDir = Path.Combine(installDir, "backups");
-            Directory.CreateDirectory(dataDir);
-            Directory.CreateDirectory(logsSubDir);
-            Directory.CreateDirectory(backupsDir);
-
-            string rootSettings = Path.Combine(installDir, "settings.json");
-            string appDir = Path.Combine(installDir, "app");
-            string appSettings = Path.Combine(appDir, "settings.json");
-            string dataSettings = Path.Combine(dataDir, "settings.json");
-
-            long rootLen = File.Exists(rootSettings) ? new FileInfo(rootSettings).Length : 0;
-            long appLen = File.Exists(appSettings) ? new FileInfo(appSettings).Length : 0;
-            long dataLen = File.Exists(dataSettings) ? new FileInfo(dataSettings).Length : 0;
-
-            if (rootLen > 0)
-            {
-                if (dataLen == 0 || (rootLen > 30_000 && dataLen < rootLen) || rootLen > dataLen)
-                {
-                    File.Copy(rootSettings, dataSettings, overwrite: true);
-                    dataLen = rootLen;
-                    WriteLog(logDir, "INFO", $"Migrated canonical root settings.json ({rootLen} bytes) to data\\settings.json.");
-                }
-                try
-                {
-                    File.SetAttributes(rootSettings, FileAttributes.Normal);
-                    File.Delete(rootSettings);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[Housekeeping.Installer] Delete root settings.json ignored: {ex.Message}");
-                }
-            }
-
-            if (appLen > 0)
-            {
-                if (dataLen == 0 || (appLen > 30_000 && dataLen < appLen))
-                {
-                    File.Copy(appSettings, dataSettings, overwrite: true);
-                    dataLen = appLen;
-                    WriteLog(logDir, "INFO", $"Migrated app\\settings.json ({appLen} bytes) to data\\settings.json.");
-                }
-                try
-                {
-                    File.SetAttributes(appSettings, FileAttributes.Normal);
-                    File.Delete(appSettings);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[Housekeeping.Installer] Delete app settings.json ignored: {ex.Message}");
-                }
-            }
-
-            string[] stateFiles =
-            [
-                "settings.json.bak",
-                "settings.json.tmp",
-                "history.json",
-                "compliance_reports.json",
-                "pending_swaps.json",
-                "interrupted_run_checkpoint.json",
-                ".hk_cookie_secret.key"
-            ];
-
-            foreach (string fileName in stateFiles)
-            {
-                MigrateSingleStateFileToData(Path.Combine(installDir, fileName), Path.Combine(dataDir, fileName), logDir);
-                if (Directory.Exists(appDir))
-                {
-                    MigrateSingleStateFileToData(Path.Combine(appDir, fileName), Path.Combine(dataDir, fileName), logDir);
-                }
-            }
-
-            foreach (string bakFile in Directory.EnumerateFiles(installDir, "settings.json.bak*", SearchOption.TopDirectoryOnly))
-            {
-                string fileName = Path.GetFileName(bakFile);
-                MigrateSingleStateFileToData(bakFile, Path.Combine(dataDir, fileName), logDir);
-            }
-
-            string[] runtimeFoldersToMoveToData =
-            [
-                "dats",
-                "tools",
-                "manifests",
-                "cache",
-                "crashes"
-            ];
-
-            foreach (string folderName in runtimeFoldersToMoveToData)
-            {
-                string srcFolder = Path.Combine(installDir, folderName);
-                string dstFolder = Path.Combine(dataDir, folderName);
-                if (Directory.Exists(srcFolder))
-                {
-                    MoveOrMergeDirectoryToData(srcFolder, dstFolder, logDir);
-                }
-            }
-
-            string rootWebView2 = Path.Combine(installDir, "WebView2Cache");
-            string dstWebView2 = Path.Combine(dataDir, "webview2_cache");
-            if (Directory.Exists(rootWebView2))
-            {
-                MoveOrMergeDirectoryToData(rootWebView2, dstWebView2, logDir);
-            }
-        }
-        catch (Exception ex)
-        {
-            WriteLog(logDir, "WARN", $"MigrateLegacyUserState warning: {ex.Message}");
-        }
-    }
-
-    private static void MigrateSingleStateFileToData(string srcFile, string dstFile, string? logDir)
-    {
-        if (!File.Exists(srcFile))
-            return;
-
-        try
-        {
-            long srcLen = new FileInfo(srcFile).Length;
-            long dstLen = File.Exists(dstFile) ? new FileInfo(dstFile).Length : 0;
-            if (!File.Exists(dstFile) || srcLen > dstLen)
-            {
-                File.Copy(srcFile, dstFile, overwrite: true);
-                WriteLog(logDir, "INFO", $"Migrated '{Path.GetFileName(srcFile)}' ({srcLen} bytes) to data\\.");
-            }
-            File.SetAttributes(srcFile, FileAttributes.Normal);
-            File.Delete(srcFile);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Housekeeping.Installer] MigrateSingleStateFileToData ({srcFile}) ignored: {ex.Message}");
-        }
-    }
-
-    private static void MoveOrMergeDirectoryToData(string srcDir, string dstDir, string? logDir)
-    {
-        try
-        {
-            if (!Directory.Exists(srcDir))
-                return;
-
-            if (!Directory.Exists(dstDir))
-            {
-                try
-                {
-                    Directory.Move(srcDir, dstDir);
-                    WriteLog(logDir, "INFO", $"Moved runtime directory '{Path.GetFileName(srcDir)}' into data\\{Path.GetFileName(dstDir)}.");
-                    return;
-                }
-                catch (Exception moveEx)
-                {
-                    Debug.WriteLine($"[Housekeeping.Installer] Directory.Move fallback to recursive merge ({srcDir}): {moveEx.Message}");
-                }
-            }
-
-            Directory.CreateDirectory(dstDir);
-            foreach (string file in Directory.GetFiles(srcDir, "*", SearchOption.TopDirectoryOnly))
-            {
-                string destFile = Path.Combine(dstDir, Path.GetFileName(file));
-                MigrateSingleStateFileToData(file, destFile, logDir);
-            }
-
-            foreach (string sub in Directory.GetDirectories(srcDir, "*", SearchOption.TopDirectoryOnly))
-            {
-                string destSub = Path.Combine(dstDir, Path.GetFileName(sub));
-                MoveOrMergeDirectoryToData(sub, destSub, logDir);
-            }
-
-            Directory.Delete(srcDir, recursive: true);
-        }
-        catch (Exception ex)
-        {
-            Debug.WriteLine($"[Housekeeping.Installer] MoveOrMergeDirectoryToData ({srcDir} -> {dstDir}) ignored: {ex.Message}");
-        }
-    }
-
-    public static int CleanupObsoleteInstallationFiles(
-        string installDir,
-        IEnumerable<string>? priorManifestFiles,
-        string? logDir)
-    {
-        int cleanedCount = 0;
-        if (string.IsNullOrWhiteSpace(installDir) || !Directory.Exists(installDir))
-            return 0;
-
-        string fullRoot = EnsureTrailingSep(Path.GetFullPath(installDir));
-
-        try
-        {
-            // Ensure legacy root user state and runtime folders are migrated into data\ first
-            MigrateLegacyUserState(installDir, logDir);
-
-            // Sweep 1: Remove all *.old_upgrade files recursively
-            foreach (string oldFile in Directory.EnumerateFiles(installDir, "*.old_upgrade", SearchOption.AllDirectories))
-            {
-                try
-                {
-                    File.SetAttributes(oldFile, FileAttributes.Normal);
-                    File.Delete(oldFile);
-                    cleanedCount++;
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[Housekeeping.Installer] Old upgrade file delete ignored ({oldFile}): {ex.Message}");
-                }
-            }
-
-            // Sweep 2: Enforce Clean Release Root on top-level files (only Housekeeping.exe and mother.manifest.json remain in root)
-            string[] legacyRootExtensions =
-            [
-                ".dll",
-                ".pdb",
-                ".deps.json",
-                ".runtimeconfig.json",
-                ".staticwebassets.endpoints.json",
-                ".xml"
-            ];
-
-            HashSet<string> legacyRootFileNames = new(StringComparer.OrdinalIgnoreCase)
-            {
-                "Housekeeping.Server.exe",
-                "Housekeeping.DesktopHost.exe",
-                "Housekeeping.lnk",
-                UninstallerExeName,
-                ".install_manifest.json",
-                "install-manifest.json",
-                "version.txt",
-                "web.config",
-                "CHANGELOG.md",
-                "README.md",
-                "MODULES_REFERENCE.md",
-                "FEATURES.md",
-                "ROADMAP.md"
-            };
-
-            string? selfExe = Environment.ProcessPath;
-
-            foreach (string rootFile in Directory.EnumerateFiles(installDir, "*", SearchOption.TopDirectoryOnly))
-            {
-                string fileName = Path.GetFileName(rootFile);
-                if (!string.IsNullOrWhiteSpace(selfExe) &&
-                    string.Equals(Path.GetFullPath(selfExe), Path.GetFullPath(rootFile), StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                bool shouldDelete = legacyRootFileNames.Contains(fileName) ||
-                                    legacyRootExtensions.Any(ext => fileName.EndsWith(ext, StringComparison.OrdinalIgnoreCase));
-
-                if (shouldDelete)
-                {
-                    try
-                    {
-                        File.SetAttributes(rootFile, FileAttributes.Normal);
-                        File.Delete(rootFile);
-                        cleanedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[Housekeeping.Installer] Legacy root file delete ignored ({fileName}): {ex.Message}");
-                    }
-                }
-            }
-
-            // Sweep 3: Remove legacy root asset and cache directories that now live inside app\ or data\
-            string[] legacyRootDirectories =
-            [
-                "Assets",
-                "runtimes",
-                "wwwroot",
-                "WebView2Cache"
-            ];
-
-            foreach (string dirName in legacyRootDirectories)
-            {
-                string dirPath = Path.Combine(installDir, dirName);
-                if (Directory.Exists(dirPath))
-                {
-                    try
-                    {
-                        Directory.Delete(dirPath, recursive: true);
-                        cleanedCount++;
-                    }
-                    catch (Exception ex)
-                    {
-                        Debug.WriteLine($"[Housekeeping.Installer] Legacy root directory delete ignored ({dirName}): {ex.Message}");
-                    }
-                }
-            }
-
-            // Sweep 4: Remove obsolete prior manifest entries that were rooted outside app\
-            if (priorManifestFiles != null)
-            {
-                foreach (string oldRel in priorManifestFiles)
-                {
-                    if (string.IsNullOrWhiteSpace(oldRel))
-                        continue;
-
-                    string normOld = oldRel.Replace('/', Path.DirectorySeparatorChar).TrimStart(Path.DirectorySeparatorChar);
-                    if (IsProtectedUserRelPath(normOld))
-                        continue;
-
-                    if (!normOld.Contains(Path.DirectorySeparatorChar) &&
-                        !normOld.Equals("Housekeeping.exe", StringComparison.OrdinalIgnoreCase) &&
-                        !normOld.Equals("mother.manifest.json", StringComparison.OrdinalIgnoreCase))
-                    {
-                        string oldCandidate = Path.GetFullPath(Path.Combine(installDir, normOld));
-                        if (oldCandidate.StartsWith(fullRoot, StringComparison.OrdinalIgnoreCase) && File.Exists(oldCandidate))
-                        {
-                            try
-                            {
-                                File.SetAttributes(oldCandidate, FileAttributes.Normal);
-                                File.Delete(oldCandidate);
-                                cleanedCount++;
-                            }
-                            catch (Exception ex)
-                            {
-                                Debug.WriteLine($"[Housekeeping.Installer] Prior manifest file delete ignored ({normOld}): {ex.Message}");
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (cleanedCount > 0)
-            {
-                WriteLog(logDir, "INFO", $"Cleaned up {cleanedCount} obsolete/legacy installation item(s) from {installDir}.");
-            }
-        }
-        catch (Exception ex)
-        {
-            WriteLog(logDir, "WARN", $"CleanupObsoleteInstallationFiles warning: {ex.Message}");
-        }
-
-        return cleanedCount;
     }
 
     internal static int RunInstall(
@@ -1123,7 +783,8 @@ public static class Program
                     Debug.WriteLine($"[Housekeeping.Installer] Malformed prior manifest ignored: {ex.Message}");
                 }
 
-                try { File.Delete(receiptPath); } catch { }
+                try { File.Delete(receiptPath); }
+                catch (Exception ex) { Debug.WriteLine($"[Housekeeping.Installer] Receipt delete ignored: {ex.Message}"); }
             }
 
             string? selfExe = Environment.ProcessPath;
@@ -1132,7 +793,8 @@ public static class Program
                 (string.IsNullOrWhiteSpace(selfExe) ||
                  !string.Equals(Path.GetFullPath(selfExe), Path.GetFullPath(appUninstExe), StringComparison.OrdinalIgnoreCase)))
             {
-                try { File.Delete(appUninstExe); } catch { }
+                try { File.Delete(appUninstExe); }
+                catch (Exception ex) { Debug.WriteLine($"[Housekeeping.Installer] App uninstaller delete ignored: {ex.Message}"); }
             }
 
             string[] appFolders = ["app", "Assets", "runtimes", "wwwroot", "scripts", "WebView2Cache"];
@@ -1141,7 +803,8 @@ public static class Program
                 string p = Path.Combine(installDir, sub);
                 if (Directory.Exists(p))
                 {
-                    try { Directory.Delete(p, recursive: true); } catch { }
+                    try { Directory.Delete(p, recursive: true); }
+                    catch (Exception ex) { Debug.WriteLine($"[Housekeeping.Installer] App folder delete ignored ({p}): {ex.Message}"); }
                 }
             }
 
@@ -1149,6 +812,7 @@ public static class Program
             [
                 "Housekeeping.exe",
                 "mother.manifest.json",
+                "AGENTS.md",
                 "Housekeeping.dll",
                 "Housekeeping.deps.json",
                 "Housekeeping.runtimeconfig.json",
@@ -1422,7 +1086,7 @@ public static class Program
         if (stream == null)
         {
             string asmVer = Assembly.GetExecutingAssembly()
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "1.0.0-rc.10-nightly.1";
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.1.12";
             int plusIdx = asmVer.IndexOf('+');
             if (plusIdx > 0)
             {
@@ -1432,7 +1096,7 @@ public static class Program
         }
 
         var meta = JsonSerializer.Deserialize<EmbeddedMetadata>(stream);
-        return meta ?? new EmbeddedMetadata("Housekeeping", "1.0.0-rc.10-nightly.1", "", 0);
+        return meta ?? new EmbeddedMetadata("Housekeeping", "0.1.12", "", 0);
     }
 
     private static string ResolveInstallDirectory(string? explicitDir, string? dataDir, bool testMode, bool silent, bool dryRun)

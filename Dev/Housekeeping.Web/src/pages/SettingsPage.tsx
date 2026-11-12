@@ -1,6 +1,11 @@
+// @module: Housekeeping.Web/pages/SettingsPage
+// @purpose: Global Settings workspace across 8 subtabs with Standard 09 2-line hover hints and extracted Greenroom/Doctor panels.
+// @depends-on: react, ../components/HybridPathPicker, ../context/AppStateContext, ../hints/settings, ../services/apiClient, ../types/models, ./settings/SettingsIntegrationsAndDoctorCard
+// @exports: SettingsPage
 import React, { useEffect, useState } from 'react';
 import { HybridPathPicker } from '../components/HybridPathPicker';
 import { useAppState, type ColorSchemeMode, type UiDensityMode } from '../context/AppStateContext';
+import { SETTINGS_HINTS } from '../hints/settings';
 import { apiClient } from '../services/apiClient';
 import type {
   DependencyStatusItem,
@@ -10,6 +15,7 @@ import type {
   TailscalePwaStatusDto,
   VerbosityLevel,
 } from '../types/models';
+import { SettingsIntegrationsAndDoctorCard } from './settings/SettingsIntegrationsAndDoctorCard';
 
 type SettingsSection =
   | 'tools'
@@ -48,8 +54,8 @@ export const SettingsPage: React.FC = () => {
         sessionStorage.removeItem('hk-settings-subtab');
         return requested;
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.debug('[SettingsPage] sessionStorage subtab read skipped:', err);
     }
     return 'tools';
   });
@@ -69,11 +75,11 @@ export const SettingsPage: React.FC = () => {
     apiClient
       .getModulesCatalog()
       .then((res) => setDeps(res.dependencies || []))
-      .catch(() => {});
+      .catch((err) => console.debug('[SettingsPage] dependencies load failed:', err));
   }, []);
 
   useEffect(() => {
-    if (section !== 'web') return;
+    if (section !== 'web' && section !== 'doctor') return;
     let active = true;
     const loadTs = () => {
       apiClient
@@ -81,7 +87,7 @@ export const SettingsPage: React.FC = () => {
         .then((res) => {
           if (active) setTailscalePwa(res);
         })
-        .catch(() => {});
+        .catch((err) => console.debug('[SettingsPage] Tailscale status probe failed:', err));
     };
     loadTs();
 
@@ -269,18 +275,18 @@ export const SettingsPage: React.FC = () => {
               <table className="hk-table">
                 <thead>
                   <tr>
-                    <th>Profile ID</th>
-                    <th>Display Name</th>
-                    <th>Ext</th>
-                    <th>Encoder</th>
-                    <th>Preset</th>
-                    <th>RF</th>
-                    <th>Max W×H</th>
-                    <th>Audio</th>
-                    <th>Kbps</th>
-                    <th>Subs</th>
-                    <th>Extra Flags</th>
-                    <th>Del</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbId}>Profile ID</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbName}>Display Name</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbExt}>Ext</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbEnc}>Encoder</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbPreset}>Preset</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbRf}>RF</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbMaxWh}>Max W×H</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbAudio}>Audio</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbKbps}>Kbps</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbSubs}>Subs</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbFlags}>Extra Flags</th>
+                    <th className="hk-has-hint" title={SETTINGS_HINTS.thHbDel}>Del</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -490,27 +496,33 @@ export const SettingsPage: React.FC = () => {
           <div className="hk-card">
             <h3 className="hk-card-title">🖥 Windows Tray Daemon &amp; Task Scheduler Watchdog</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 10 }}>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.startWithWindows}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.startWithWindows}
                   checked={config.StartWithWindows}
                   onChange={(e) => updateConfig((d) => (d.StartWithWindows = e.target.checked))}
                 />
                 Launch Housekeeping Tray Daemon Automatically at Windows Logon
               </label>
 
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.startMinimized}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.startMinimized}
                   checked={config.StartMinimizedToTray}
                   onChange={(e) => updateConfig((d) => (d.StartMinimizedToTray = e.target.checked))}
                 />
                 Start Silently in System Tray (Backend Always Running)
               </label>
 
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.autoRestartInterrupted}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.autoRestartInterrupted}
                   checked={Boolean(config.AutoRestartInterruptedRunsOnStartup)}
                   onChange={(e) =>
                     updateConfig((d) => (d.AutoRestartInterruptedRunsOnStartup = e.target.checked))
@@ -541,9 +553,11 @@ export const SettingsPage: React.FC = () => {
               Automatically defers background scheduled runs while emulators or OBS are active so
               CPU/GPU frame times never stutter.
             </p>
-            <label className="hk-checkbox-label" style={{ margin: '10px 0' }}>
+            <label className="hk-checkbox-label hk-has-hint" style={{ margin: '10px 0' }} title={SETTINGS_HINTS.enableProcessGuard}>
               <input
                 type="checkbox"
+                className="hk-has-hint"
+                title={SETTINGS_HINTS.enableProcessGuard}
                 checked={config.EnableProcessGuard}
                 onChange={(e) => updateConfig((d) => (d.EnableProcessGuard = e.target.checked))}
               />
@@ -606,9 +620,11 @@ export const SettingsPage: React.FC = () => {
           <h3 className="hk-card-title">🌐 NAS Network Drop Resilience &amp; Atomic Writes</h3>
           <div className="hk-grid-2" style={{ marginTop: 12 }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.networkDropSafety}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.networkDropSafety}
                   checked={config.EnableNetworkDropSafety}
                   onChange={(e) =>
                     updateConfig((d) => (d.EnableNetworkDropSafety = e.target.checked))
@@ -616,9 +632,11 @@ export const SettingsPage: React.FC = () => {
                 />
                 Pause &amp; Auto-Retry When SMB / NAS Network Shares Drop
               </label>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.atomicPartialWrites}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.atomicPartialWrites}
                   checked={config.EnableAtomicPartialWrites}
                   onChange={(e) =>
                     updateConfig((d) => (d.EnableAtomicPartialWrites = e.target.checked))
@@ -626,9 +644,11 @@ export const SettingsPage: React.FC = () => {
                 />
                 Write Transcodes Atomically via <code>.partial</code> + Deferred Pending Swaps
               </label>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.cleanupPartials}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.cleanupPartials}
                   checked={config.CleanupPartialsOnStartup}
                   onChange={(e) =>
                     updateConfig((d) => (d.CleanupPartialsOnStartup = e.target.checked))
@@ -636,9 +656,11 @@ export const SettingsPage: React.FC = () => {
                 />
                 Clean Up Interrupted <code>.partial</code> Artifacts on Startup
               </label>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.distributedLocking}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.distributedLocking}
                   checked={config.EnableDistributedNetworkLocking}
                   onChange={(e) =>
                     updateConfig((d) => (d.EnableDistributedNetworkLocking = e.target.checked))
@@ -760,9 +782,11 @@ export const SettingsPage: React.FC = () => {
                 </div>
               </div>
 
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.bindLanTailnet}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.bindLanTailnet}
                   checked={config.WebServer.BindLanAndTailnet}
                   onChange={(e) =>
                     updateConfig((d) => (d.WebServer.BindLanAndTailnet = e.target.checked))
@@ -772,9 +796,11 @@ export const SettingsPage: React.FC = () => {
                 <code>127.0.0.1</code> only)
               </label>
 
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.trustTailscaleHeaders}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.trustTailscaleHeaders}
                   checked={config.WebServer.TrustTailscaleServeHeaders}
                   onChange={(e) =>
                     updateConfig((d) => (d.WebServer.TrustTailscaleServeHeaders = e.target.checked))
@@ -784,9 +810,11 @@ export const SettingsPage: React.FC = () => {
                 <code>tailscale serve</code>
               </label>
 
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.restrictRawShell}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.restrictRawShell}
                   disabled={Boolean(authStatus?.rawShellBlockedForCaller)}
                   checked={config.WebServer.RestrictRawShellToLocalhost}
                   onChange={(e) =>
@@ -891,9 +919,10 @@ export const SettingsPage: React.FC = () => {
                     void navigator.clipboard
                       .writeText(config.WebServer.NodeApiToken)
                       .then(() => showToast('Copied Node API Token to clipboard.'))
-                      .catch(() =>
-                        showToast('Clipboard write blocked by browser. Copy from input field directly.')
-                      );
+                      .catch((err) => {
+                        console.debug('[SettingsPage] clipboard write failed:', err);
+                        showToast('Clipboard write blocked by browser. Copy from input field directly.');
+                      });
                   }}
                 >
                   📋 Copy
@@ -1065,9 +1094,10 @@ export const SettingsPage: React.FC = () => {
                       void navigator.clipboard
                         .writeText(tailscalePwa.HttpsPwaUrl)
                         .then(() => showToast(`Copied ${tailscalePwa.HttpsPwaUrl} to clipboard.`))
-                        .catch(() =>
-                          showToast('Clipboard write blocked by browser. Copy URL directly.')
-                        );
+                        .catch((err) => {
+                          console.debug('[SettingsPage] PWA URL clipboard write failed:', err);
+                          showToast('Clipboard write blocked by browser. Copy URL directly.');
+                        });
                     }}
                   >
                     📋 Copy URL
@@ -1091,132 +1121,24 @@ export const SettingsPage: React.FC = () => {
         </div>
       )}
 
-      {/* 5. GREENROOM (:8420) INTEGRATION */}
+      {/* 5. GREENROOM (:8420) & SISTER-APP COEXISTENCE */}
       {section === 'greenroom' && (
-        <div className="hk-card">
-          <div className="hk-card-header">
-            <div>
-              <h3 className="hk-card-title" style={{ color: 'var(--greenroom)' }}>
-                🟢 Greenroom Companion (:8420) Ecosystem Integration
-              </h3>
-              <p className="hk-card-subtitle">
-                Automatically triggers Greenroom catalog &amp; hash ingestion whenever Module 4 or
-                Module 8 writes new or updated manifest rows.
-              </p>
-            </div>
-            <div className="hk-row">
-              <span className={`hk-pill ${greenroomStatus?.CompanionOnline ? 'ok' : 'warn'}`}>
-                {greenroomStatus?.StatusMessage || 'Checking :8420...'}
-              </span>
-              <button
-                type="button"
-                className="hk-btn sm"
-                onClick={() => void refreshGreenroomStatus()}
-              >
-                🔄 Probe :8420
-              </button>
-              <button
-                type="button"
-                className="hk-btn sm success"
-                onClick={async () => {
-                  await flushSaveNow();
-                  const res = await apiClient.syncGreenroomNow('RomLauncherGenerator');
-                  await refreshGreenroomStatus();
-                  showToast(res.Summary);
-                }}
-              >
-                ⚡ Trigger Greenroom Sync Now
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <label className="hk-checkbox-label">
-              <input
-                type="checkbox"
-                checked={config.GreenroomIntegration.Enabled}
-                onChange={(e) =>
-                  updateConfig((d) => (d.GreenroomIntegration.Enabled = e.target.checked))
-                }
-              />
-              Enable Greenroom Ecosystem Integration
-            </label>
-            <label className="hk-checkbox-label">
-              <input
-                type="checkbox"
-                checked={config.GreenroomIntegration.AutoSyncAfterRomManifestChanges}
-                onChange={(e) =>
-                  updateConfig(
-                    (d) =>
-                      (d.GreenroomIntegration.AutoSyncAfterRomManifestChanges = e.target.checked)
-                  )
-                }
-              />
-              Auto-Trigger <code>collect_library</code> + <code>verify_hashes</code> After ROM
-              Manifest Changes (Module 4)
-            </label>
-            <label className="hk-checkbox-label">
-              <input
-                type="checkbox"
-                checked={config.GreenroomIntegration.AutoSyncAfterCollectionManifestChanges}
-                onChange={(e) =>
-                  updateConfig(
-                    (d) =>
-                      (d.GreenroomIntegration.AutoSyncAfterCollectionManifestChanges =
-                        e.target.checked)
-                  )
-                }
-              />
-              Auto-Trigger <code>collect_library</code> + <code>collect_plex</code> After Collection
-              Manifest Changes (Module 8)
-            </label>
-
-            <div className="hk-grid-3" style={{ marginTop: 6 }}>
-              <div className="hk-field">
-                <label className="hk-field-label">Companion Base URL</label>
-                <input
-                  type="text"
-                  className="hk-input mono"
-                  value={config.GreenroomIntegration.CompanionBaseUrl}
-                  onChange={(e) =>
-                    updateConfig((d) => (d.GreenroomIntegration.CompanionBaseUrl = e.target.value))
-                  }
-                />
-              </div>
-              <div className="hk-field">
-                <label className="hk-field-label">Companion Port (For Top-Bar Host Link)</label>
-                <input
-                  type="number"
-                  className="hk-input mono"
-                  value={config.GreenroomIntegration.CompanionPort}
-                  onChange={(e) =>
-                    updateConfig(
-                      (d) =>
-                        (d.GreenroomIntegration.CompanionPort = Number(e.target.value) || 8420)
-                    )
-                  }
-                />
-              </div>
-              <div className="hk-field">
-                <label className="hk-field-label">
-                  Greenroom Root Folder (<code>run_greenroom.bat</code> Fallback)
-                </label>
-                <HybridPathPicker
-                  value={config.GreenroomIntegration.GreenroomRootPath}
-                  onChange={(next) =>
-                    updateConfig((d) => (d.GreenroomIntegration.GreenroomRootPath = next))
-                  }
-                />
-              </div>
-            </div>
-
-            {greenroomStatus && (
-              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
-                Last Auto-Sync: <strong>{greenroomStatus.LastAutoSyncSummary}</strong>
-              </div>
-            )}
-          </div>
-        </div>
+        <SettingsIntegrationsAndDoctorCard
+          mode="greenroom"
+          config={config}
+          authStatus={authStatus}
+          greenroomStatus={greenroomStatus}
+          tailscalePwa={tailscalePwa}
+          deps={deps}
+          disks={disks}
+          doctorBusy={doctorBusy}
+          setDoctorBusy={setDoctorBusy}
+          setDeps={setDeps}
+          updateConfig={updateConfig}
+          flushSaveNow={flushSaveNow}
+          refreshGreenroomStatus={refreshGreenroomStatus}
+          showToast={showToast}
+        />
       )}
 
       {/* 6. VERBOSITY & NOTIFICATIONS */}
@@ -1279,10 +1201,13 @@ export const SettingsPage: React.FC = () => {
               <div className="hk-row">
                 {ALL_LOG_TAGS.map((tag) => {
                   const active = config.CustomVerbosity.TerminalTags.includes(tag);
+                  const tagHint = SETTINGS_HINTS.customTagToggle(tag);
                   return (
-                    <label key={tag} className="hk-checkbox-label">
+                    <label key={tag} className="hk-checkbox-label hk-has-hint" title={tagHint}>
                       <input
                         type="checkbox"
+                        className="hk-has-hint"
+                        title={tagHint}
                         checked={active}
                         onChange={(e) =>
                           updateConfig((d) => {
@@ -1308,9 +1233,11 @@ export const SettingsPage: React.FC = () => {
           <div className="hk-card">
             <h3 className="hk-card-title">🔔 Tray Balloon &amp; Discord Webhook Alerts</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 10 }}>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.enableTrayToasts}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.enableTrayToasts}
                   checked={config.EnableToastNotifications}
                   onChange={(e) =>
                     updateConfig((d) => (d.EnableToastNotifications = e.target.checked))
@@ -1318,9 +1245,11 @@ export const SettingsPage: React.FC = () => {
                 />
                 Enable Windows Tray Balloon Notifications
               </label>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.enableDiscordWebhook}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={SETTINGS_HINTS.enableDiscordWebhook}
                   checked={config.EnableDiscordWebhook}
                   onChange={(e) => updateConfig((d) => (d.EnableDiscordWebhook = e.target.checked))}
                 />
@@ -1339,9 +1268,11 @@ export const SettingsPage: React.FC = () => {
               </div>
 
               <div className="hk-grid-2">
-                <label className="hk-checkbox-label">
+                <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.discordQueueStart}>
                   <input
                     type="checkbox"
+                    className="hk-has-hint"
+                    title={SETTINGS_HINTS.discordQueueStart}
                     checked={config.DiscordNotifyQueueStart}
                     onChange={(e) =>
                       updateConfig((d) => (d.DiscordNotifyQueueStart = e.target.checked))
@@ -1349,9 +1280,11 @@ export const SettingsPage: React.FC = () => {
                   />
                   Notify Queue Start
                 </label>
-                <label className="hk-checkbox-label">
+                <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.discordQueueFinish}>
                   <input
                     type="checkbox"
+                    className="hk-has-hint"
+                    title={SETTINGS_HINTS.discordQueueFinish}
                     checked={config.DiscordNotifyQueueFinish}
                     onChange={(e) =>
                       updateConfig((d) => (d.DiscordNotifyQueueFinish = e.target.checked))
@@ -1359,9 +1292,11 @@ export const SettingsPage: React.FC = () => {
                   />
                   Notify Queue Finish
                 </label>
-                <label className="hk-checkbox-label">
+                <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.discordJobFinish}>
                   <input
                     type="checkbox"
+                    className="hk-has-hint"
+                    title={SETTINGS_HINTS.discordJobFinish}
                     checked={config.DiscordNotifyJobFinish}
                     onChange={(e) =>
                       updateConfig((d) => (d.DiscordNotifyJobFinish = e.target.checked))
@@ -1369,9 +1304,11 @@ export const SettingsPage: React.FC = () => {
                   />
                   Notify Individual Job Finish
                 </label>
-                <label className="hk-checkbox-label">
+                <label className="hk-checkbox-label hk-has-hint" title={SETTINGS_HINTS.discordErrors}>
                   <input
                     type="checkbox"
+                    className="hk-has-hint"
+                    title={SETTINGS_HINTS.discordErrors}
                     checked={config.DiscordNotifyErrors}
                     onChange={(e) =>
                       updateConfig((d) => (d.DiscordNotifyErrors = e.target.checked))
@@ -1462,14 +1399,14 @@ export const SettingsPage: React.FC = () => {
             <table className="hk-table">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Tailscale / LAN Host or IP</th>
-                  <th>HTTP Port</th>
-                  <th>Node API Token</th>
-                  <th>Prefer HTTP</th>
-                  <th>SMB Share Path (Fallback)</th>
-                  <th>Status</th>
-                  <th>Actions</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('Node Name')}>Name</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('Tailscale / LAN Host')}>Tailscale / LAN Host or IP</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('HTTP Port')}>HTTP Port</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('Node API Token')}>Node API Token</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('Prefer HTTP')}>Prefer HTTP</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('SMB Share Path')}>SMB Share Path (Fallback)</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('Probe Status')}>Status</th>
+                  <th className="hk-has-hint" title={SETTINGS_HINTS.thNodeCol('Node Actions')}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1539,6 +1476,8 @@ export const SettingsPage: React.FC = () => {
                       <td style={{ textAlign: 'center' }}>
                         <input
                           type="checkbox"
+                          className="hk-has-hint"
+                          title={SETTINGS_HINTS.preferHttpApi}
                           checked={n.PreferHttpApi}
                           onChange={(e) =>
                             updateConfig((d) => {
@@ -1623,242 +1562,22 @@ export const SettingsPage: React.FC = () => {
 
       {/* 8. SYSTEM DOCTOR */}
       {section === 'doctor' && (
-        <div className="hk-doctor-panel" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {/* Diagnostic Health & Specs Card */}
-          <div className="hk-card">
-            <h3 className="hk-card-title">🩺 System Diagnostics & Health Status</h3>
-            <p className="hk-card-subtitle">
-              Comprehensive telemetry, runtime environment, and core service health indicators.
-            </p>
-
-            <div className="hk-grid-4" style={{ marginTop: 12 }}>
-              <div className="hk-kpi-card">
-                <span className="hk-kpi-label">APP VERSION</span>
-                <span className="hk-kpi-value ok">{authStatus?.version || 'v1.0.0-rc.11-hf.1'}</span>
-                <span className="hk-kpi-sub">Standard 03 / RC+1</span>
-              </div>
-              <div className="hk-kpi-card">
-                <span className="hk-kpi-label">HOST MACHINE</span>
-                <span className="hk-kpi-value" style={{ fontSize: '15px' }}>{authStatus?.machineName || 'Localhost'}</span>
-                <span className="hk-kpi-sub">Archetype: Companion Daemon</span>
-              </div>
-              <div className="hk-kpi-card">
-                <span className="hk-kpi-label">API & WEB SERVER</span>
-                <span className="hk-kpi-value ok">:{config.WebServer?.Port || 5178}</span>
-                <span className="hk-kpi-sub">Loopback & LAN</span>
-              </div>
-              <div className="hk-kpi-card">
-                <span className="hk-kpi-label">TAILSCALE SERVE</span>
-                <span className={`hk-kpi-value ${tailscalePwa?.ServeConfigured ? 'ok' : 'warn'}`}>
-                  {tailscalePwa?.ServeConfigured ? 'Active' : (tailscalePwa?.TailscaleAvailable ? 'Standby' : 'Not Installed')}
-                </span>
-                <span className="hk-kpi-sub">{tailscalePwa?.DnsName || 'No HTTPS proxy'}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Critical Executables Status */}
-          <div className="hk-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <div>
-                <h3 className="hk-card-title">🔧 Core Executable Dependencies</h3>
-                <p className="hk-card-subtitle">
-                  Status and resolved binary paths for compression, transcode, and remote sync engines.
-                </p>
-              </div>
-              <button
-                type="button"
-                className="hk-btn sm"
-                onClick={() => {
-                  apiClient
-                    .getModulesCatalog()
-                    .then((res) => {
-                      setDeps(res.dependencies || []);
-                      showToast('Refreshed tool dependencies.');
-                    })
-                    .catch(() => showToast('Failed to refresh dependencies.'));
-                }}
-              >
-                ↻ Refresh Tools
-              </button>
-            </div>
-
-            <div style={{ overflowX: 'auto' }}>
-              <table className="hk-table">
-                <thead>
-                  <tr>
-                    <th>Executable / Tool</th>
-                    <th>Purpose</th>
-                    <th>Status</th>
-                    <th>Resolution Source</th>
-                    <th>Resolved Path</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {deps.map((d) => (
-                    <tr key={d.ToolName}>
-                      <td><strong>{d.ToolName}</strong></td>
-                      <td style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>{d.Description}</td>
-                      <td>
-                        <span className={`hk-pill ${d.IsAvailable ? 'ok' : 'err'}`}>
-                          {d.IsAvailable ? '✓ Ready' : '✕ Missing'}
-                        </span>
-                      </td>
-                      <td><span className="hk-pill sm">{d.SourceLabel || 'Auto'}</span></td>
-                      <td>
-                        <code style={{ fontSize: '11px', wordBreak: 'break-all' }}>
-                          {d.ResolvedPath || 'Not found'}
-                        </code>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Mounted Storage & Drive Free-Space */}
-          <div className="hk-card">
-            <h3 className="hk-card-title">💾 Storage Volumes & Mount Reachability</h3>
-            <p className="hk-card-subtitle">
-              Drive health, storage capacity, and volume reachability across local and network mounts.
-            </p>
-
-            <div style={{ overflowX: 'auto', marginTop: 8 }}>
-              <table className="hk-table">
-                <thead>
-                  <tr>
-                    <th>Drive</th>
-                    <th>Volume Label</th>
-                    <th>Type</th>
-                    <th>Capacity</th>
-                    <th>Available Free</th>
-                    <th>Free Space %</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {disks.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
-                        No drives detected.
-                      </td>
-                    </tr>
-                  ) : (
-                    disks.map((d) => {
-                      const isReady = d.IsReady !== false;
-                      const ratio = isReady && d.TotalGb > 0 ? (d.FreeGb / d.TotalGb) * 100 : 100;
-                      const statusClass = !isReady
-                        ? 'err'
-                        : d.FreeGb < 25 || ratio < 5
-                          ? 'err'
-                          : ratio < 12
-                            ? 'warn'
-                            : 'ok';
-                      return (
-                        <tr key={d.DriveLetter}>
-                          <td><strong>{d.DriveLetter}</strong></td>
-                          <td>{d.VolumeLabel || '—'}</td>
-                          <td>{d.IsNetwork ? '🌐 Network (SMB)' : '💾 Local Disk'}</td>
-                          <td>{d.TotalGb.toFixed(1)} GB</td>
-                          <td><strong>{d.FreeGb.toFixed(1)} GB</strong></td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div style={{
-                                width: 60,
-                                height: 8,
-                                background: 'var(--bg-elevated)',
-                                borderRadius: 4,
-                                overflow: 'hidden'
-                              }}>
-                                <div style={{
-                                  width: `${Math.min(100, Math.max(0, ratio))}%`,
-                                  height: '100%',
-                                  background: statusClass === 'ok' ? '#10b981' : (statusClass === 'warn' ? '#f59e0b' : '#ef4444')
-                                }} />
-                              </div>
-                              <span style={{ fontSize: '11px', fontFamily: 'var(--font-mono)' }}>
-                                {ratio.toFixed(0)}%
-                              </span>
-                            </div>
-                          </td>
-                          <td>
-                            <span className={`hk-pill ${statusClass}`}>
-                              {isReady ? (statusClass === 'ok' ? 'Healthy' : 'Low Free Space') : 'Offline'}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Maintenance & Emergency Operations */}
-          <div className="hk-card">
-            <h3 className="hk-card-title">🧰 Maintenance & System Operations</h3>
-            <p className="hk-card-subtitle">
-              One-click state snapshots, 7-Zip backup archives, and diagnostic bundle export for troubleshooting.
-            </p>
-
-            <div className="hk-row" style={{ marginTop: 12, gap: 10 }}>
-              <button
-                type="button"
-                className="hk-btn primary"
-                disabled={doctorBusy}
-                onClick={async () => {
-                  setDoctorBusy(true);
-                  try {
-                    const res = await apiClient.triggerBackupNow();
-                    showToast(`📦 Backup archive created: ${res.fileName} (${res.format})`);
-                  } catch (err) {
-                    showToast(err instanceof Error ? err.message : 'Backup failed.');
-                  } finally {
-                    setDoctorBusy(false);
-                  }
-                }}
-              >
-                {doctorBusy ? '⏳ Creating Backup...' : '📦 Backup Config & State Now (.7z)'}
-              </button>
-
-              <button
-                type="button"
-                className="hk-btn success"
-                disabled={doctorBusy}
-                onClick={async () => {
-                  setDoctorBusy(true);
-                  try {
-                    await apiClient.exportDiagnosticBundle();
-                    showToast('🩺 Exported system diagnostic bundle.');
-                  } catch (err) {
-                    showToast(err instanceof Error ? err.message : 'Diagnostic export failed.');
-                  } finally {
-                    setDoctorBusy(false);
-                  }
-                }}
-              >
-                🩺 Export Diagnostic Bundle (JSON)
-              </button>
-
-              <button
-                type="button"
-                className="hk-btn"
-                onClick={async () => {
-                  try {
-                    await flushSaveNow();
-                    showToast('💾 Saved active configuration to disk.');
-                  } catch (err) {
-                    showToast(err instanceof Error ? err.message : 'Save failed.');
-                  }
-                }}
-              >
-                💾 Save Settings.json
-              </button>
-            </div>
-          </div>
-        </div>
+        <SettingsIntegrationsAndDoctorCard
+          mode="doctor"
+          config={config}
+          authStatus={authStatus}
+          greenroomStatus={greenroomStatus}
+          tailscalePwa={tailscalePwa}
+          deps={deps}
+          disks={disks}
+          doctorBusy={doctorBusy}
+          setDoctorBusy={setDoctorBusy}
+          setDeps={setDeps}
+          updateConfig={updateConfig}
+          flushSaveNow={flushSaveNow}
+          refreshGreenroomStatus={refreshGreenroomStatus}
+          showToast={showToast}
+        />
       )}
     </div>
   );

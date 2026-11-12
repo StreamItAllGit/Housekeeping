@@ -48,6 +48,18 @@ namespace Housekeeping.DesktopHost
                 return 0;
             }
 
+            if (cli.RunStatus)
+            {
+                TryAttachParentConsole();
+                return HousekeepingCliRunner.RunStatusCheck(cli);
+            }
+
+            if (cli.RunRepairConfig)
+            {
+                TryAttachParentConsole();
+                return HousekeepingCliRunner.RunRepairConfig(cli);
+            }
+
             string mutexName = ResolveMutexName(cli);
             using var singleInstanceMutex = new Mutex(initiallyOwned: true, mutexName, out bool createdNew);
 

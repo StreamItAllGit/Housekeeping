@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppState } from '../context/AppStateContext';
 import type { FooterVerbosityLevel } from '../types/models';
 import { DualPaneTerminal } from './DualPaneTerminal';
+import { TerminalResizeHandle } from './TerminalResizeHandle';
 
 export const GlobalTerminalDrawer: React.FC = () => {
   const {
@@ -10,6 +11,9 @@ export const GlobalTerminalDrawer: React.FC = () => {
     updateConfig,
     pipelineState,
     realtimeConnected,
+    uiLayout,
+    setTerminalHeight,
+    applyTerminalPreset,
     globalDrawerOpen,
     setGlobalDrawerOpen,
   } = useAppState();
@@ -19,7 +23,17 @@ export const GlobalTerminalDrawer: React.FC = () => {
   return (
     <>
       {showDrawer && (
-        <section className="hk-global-drawer" aria-label="Global Live Terminal Drawer">
+        <section
+          className="hk-global-drawer"
+          style={{ blockSize: `${uiLayout.TerminalHeightPx}px` }}
+          aria-label="Global Live Terminal Drawer"
+        >
+          <TerminalResizeHandle
+            heightPx={uiLayout.TerminalHeightPx}
+            direction="grow-up"
+            onChangeHeight={(h) => setTerminalHeight(h, 'custom')}
+            onResetMedium={() => applyTerminalPreset('medium')}
+          />
           <div
             className="hk-row"
             style={{ justifyContent: 'space-between', marginBottom: 6, flex: '0 0 auto' }}
@@ -28,13 +42,29 @@ export const GlobalTerminalDrawer: React.FC = () => {
               ⌨ Live Terminal Drawer
               <span className="hk-desktop-only"> (Press Ctrl+` to toggle)</span>
             </strong>
-            <button
-              type="button"
-              className="hk-btn sm"
-              onClick={() => setGlobalDrawerOpen(false)}
-            >
-              ▼ Collapse
-            </button>
+            <div className="hk-row" style={{ gap: 4 }}>
+              {(['small', 'medium', 'large'] as const).map((preset) => {
+                const short = preset === 'small' ? 'S' : preset === 'medium' ? 'M' : 'L';
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    className={`hk-btn sm ${uiLayout.TerminalSizePreset === preset ? 'primary' : ''}`}
+                    title={`Set terminal height preset: ${preset}`}
+                    onClick={() => applyTerminalPreset(preset)}
+                  >
+                    {short}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="hk-btn sm"
+                onClick={() => setGlobalDrawerOpen(false)}
+              >
+                ▼ Collapse
+              </button>
+            </div>
           </div>
           <div
             style={{
@@ -91,7 +121,7 @@ export const GlobalTerminalDrawer: React.FC = () => {
                 </div>
               </div>
               <span
-                className="hk-mobile-only hk-pill accent"
+                className="hk-mobile-only hk-pill accent nowrap"
                 style={{ fontSize: 10.5, padding: '1px 6px', flexShrink: 0 }}
               >
                 {Math.min(100, Math.max(0, pipelineState.ProgressPercent)).toFixed(0)}%

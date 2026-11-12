@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Housekeeping.Models;
@@ -16,47 +16,7 @@ namespace Housekeeping.Services
         PendingLocked
     }
 
-    public class DistributedLockInfo
-    {
-        public string MachineName { get; set; } = Environment.MachineName;
-        public string UserName { get; set; } = Environment.UserName;
-        public int ProcessId { get; set; } = Environment.ProcessId;
-        public DateTime StartedAtUtc { get; set; } = DateTime.UtcNow;
-        public DateTime HeartbeatAtUtc { get; set; } = DateTime.UtcNow;
-        public string TargetFilePath { get; set; } = "";
-    }
-
-    public sealed class DistributedFileLock : IDisposable
-    {
-        private readonly string _lockFilePath;
-        private readonly Action<string, string> _log;
-        private bool _disposed;
-
-        public DistributedFileLock(string lockFilePath, Action<string, string> log)
-        {
-            _lockFilePath = lockFilePath;
-            _log = log;
-        }
-
-        public void Dispose()
-        {
-            if (_disposed) return;
-            _disposed = true;
-            try
-            {
-                if (File.Exists(_lockFilePath))
-                {
-                    File.Delete(_lockFilePath);
-                }
-            }
-            catch (Exception ex)
-            {
-                _log("WARN", $"Failed to release distributed lock '{Path.GetFileName(_lockFilePath)}': {ex.Message}");
-            }
-        }
-    }
-
-    public class NetworkSafetyService
+    public partial class NetworkSafetyService
     {
         private readonly Func<AppConfig> _getConfig;
         private readonly Action<string, string> _log;
@@ -74,10 +34,7 @@ namespace Housekeeping.Services
             _pendingSwapService = pendingSwapService;
         }
 
-        public void TriggerManualRetry()
-        {
-            _manualRetrySignal?.TrySetResult(true);
-        }
+        public void TriggerManualRetry() => _manualRetrySignal?.TrySetResult(true);
 
         public void TriggerSkipWait()
         {
@@ -87,37 +44,31 @@ namespace Housekeeping.Services
 
         public static bool IsPathReachable(string? path)
         {
-            if (string.IsNullOrWhiteSpace(path))
-                return false;
-
+            if (string.IsNullOrWhiteSpace(path)) return false;
             try
             {
                 string? root = Path.GetPathRoot(path);
-                if (!string.IsNullOrEmpty(root) && !Directory.Exists(root))
-                    return false;
-
+                if (!string.IsNullOrEmpty(root) && !Directory.Exists(root)) return false;
                 return Directory.Exists(path);
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"[NetworkSafetyService] IsPathReachable check error: {ex.Message}");
                 return false;
             }
         }
 
         public static bool IsRootReachable(string? path)
         {
-            if (string.IsNullOrWhiteSpace(path))
-                return false;
-
+            if (string.IsNullOrWhiteSpace(path)) return false;
             try
             {
                 string? root = Path.GetPathRoot(path);
-                if (string.IsNullOrEmpty(root))
-                    return Directory.Exists(path);
-                return Directory.Exists(root);
+                return string.IsNullOrEmpty(root) ? Directory.Exists(path) : Directory.Exists(root);
             }
-            catch
+            catch (Exception ex)
             {
+                Debug.WriteLine($"[NetworkSafetyService] IsRootReachable check error: {ex.Message}");
                 return false;
             }
         }
@@ -125,7 +76,6 @@ namespace Housekeeping.Services
         public async Task<bool> EnsureDirectoryReachableAsync(string directoryPath, string contextName, bool createIfRootExists, CancellationToken ct)
         {
             var cfg = _getConfig();
-
             if (CheckAndPrepareDirectory(directoryPath, createIfRootExists))
                 return true;
 
@@ -182,28 +132,21 @@ namespace Housekeeping.Services
         {
             try
             {
-                if (Directory.Exists(directoryPath))
-                    return true;
-
+                if (Directory.Exists(directoryPath)) return true;
                 if (createIfRootExists && IsRootReachable(directoryPath))
                 {
                     Directory.CreateDirectory(directoryPath);
                     return Directory.Exists(directoryPath);
                 }
             }
-            catch
-            {
-                return false;
-            }
-
+            catch (Exception ex) { Debug.WriteLine($"[NetworkSafetyService] CheckAndPrepareDirectory error: {ex.Message}"); }
             return false;
         }
 
         public string GetSafeEncodeOutputPath(string finalOutputPath)
         {
             var cfg = _getConfig();
-            if (!cfg.EnableAtomicPartialWrites)
-                return finalOutputPath;
+            if (!cfg.EnableAtomicPartialWrites) return finalOutputPath;
 
             string dir = Path.GetDirectoryName(finalOutputPath) ?? "";
             string nameNoExt = Path.GetFileNameWithoutExtension(finalOutputPath);
@@ -214,29 +157,18 @@ namespace Housekeeping.Services
         public PendingSwapCheckResult TryResolveOrRecoverPendingEncode(string finalOutputPath, Action<string, string>? log = null)
         {
             var logger = log ?? _log;
-
-            // 1. Check if PendingSwapService tracks a completed encode for this target
             if (_pendingSwapService != null)
             {
                 var pendingItem = _pendingSwapService.FindByTarget(finalOutputPath);
                 if (pendingItem != null)
                 {
                     if (!File.Exists(pendingItem.WorkingPath) || new FileInfo(pendingItem.WorkingPath).Length == 0)
-                    {
                         _pendingSwapService.Discard(pendingItem, logger);
-                    }
                     else
-                    {
-                        if (_pendingSwapService.RetrySwap(pendingItem, logger))
-                        {
-                            return PendingSwapCheckResult.Committed;
-                        }
-                        return PendingSwapCheckResult.PendingLocked;
-                    }
+                        return _pendingSwapService.RetrySwap(pendingItem, logger) ? PendingSwapCheckResult.Committed : PendingSwapCheckResult.PendingLocked;
                 }
             }
 
-            // 2. Check for an unregistered .new fallback file
             string fallbackNew = finalOutputPath + ".new";
             if (File.Exists(fallbackNew))
             {
@@ -246,21 +178,13 @@ namespace Housekeeping.Services
                     {
                         logger("INFO", $"  -> [Recover] Found completed pending encode '{Path.GetFileName(fallbackNew)}'. Attempting swap...");
                         if (CommitPartialEncode(fallbackNew, finalOutputPath))
-                        {
-                            return File.Exists(finalOutputPath)
-                                ? PendingSwapCheckResult.Committed
-                                : PendingSwapCheckResult.PendingLocked;
-                        }
+                            return File.Exists(finalOutputPath) ? PendingSwapCheckResult.Committed : PendingSwapCheckResult.PendingLocked;
                         return PendingSwapCheckResult.PendingLocked;
                     }
                 }
-                catch (Exception ex)
-                {
-                    logger("WARN", $"  -> [Recover] Error inspecting fallback file '{Path.GetFileName(fallbackNew)}': {ex.Message}");
-                }
+                catch (Exception ex) { logger("WARN", $"  -> [Recover] Error inspecting fallback file '{Path.GetFileName(fallbackNew)}': {ex.Message}"); }
             }
 
-            // 3. Check if the .partial.* path itself is registered in PendingSwaps
             string workingPartial = GetSafeEncodeOutputPath(finalOutputPath);
             if (!string.Equals(workingPartial, finalOutputPath, StringComparison.OrdinalIgnoreCase) &&
                 _pendingSwapService != null &&
@@ -268,11 +192,9 @@ namespace Housekeeping.Services
             {
                 var item = _pendingSwapService.GetAll().FirstOrDefault(x =>
                     string.Equals(x.WorkingPath, workingPartial, StringComparison.OrdinalIgnoreCase));
-                if (item != null && _pendingSwapService.RetrySwap(item, logger))
-                {
-                    return PendingSwapCheckResult.Committed;
-                }
-                return PendingSwapCheckResult.PendingLocked;
+                return item != null && _pendingSwapService.RetrySwap(item, logger)
+                    ? PendingSwapCheckResult.Committed
+                    : PendingSwapCheckResult.PendingLocked;
             }
 
             return PendingSwapCheckResult.None;
@@ -282,8 +204,7 @@ namespace Housekeeping.Services
         {
             try
             {
-                if (!File.Exists(workingOutputPath))
-                    return false;
+                if (!File.Exists(workingOutputPath)) return false;
 
                 var info = new FileInfo(workingOutputPath);
                 if (info.Length == 0)
@@ -297,81 +218,77 @@ namespace Housekeeping.Services
 
                 string? targetDir = Path.GetDirectoryName(finalOutputPath);
                 if (!string.IsNullOrWhiteSpace(targetDir) && !Directory.Exists(targetDir))
-                {
                     Directory.CreateDirectory(targetDir);
-                }
+
+                maxAttempts = Math.Max(1, maxAttempts);
+                string? lastError = null;
 
                 for (int attempt = 1; attempt <= maxAttempts; attempt++)
                 {
+                    if (!TryProbeExclusiveAccess(workingOutputPath, out string? workErr))
+                    {
+                        lastError = workErr;
+                        if (attempt < maxAttempts)
+                        {
+                            int delay = Math.Min(initialDelayMs * attempt, 3000);
+                            _log("NET", $"[Retry] Working partial file '{Path.GetFileName(workingOutputPath)}' is still held by encoder/AV/SMB ({workErr}). Retrying {attempt}/{maxAttempts} in {delay}ms...");
+                            Thread.Sleep(delay);
+                        }
+                        continue;
+                    }
+
+                    if (File.Exists(finalOutputPath) && !TryProbeExclusiveAccess(finalOutputPath, out string? destErr))
+                    {
+                        lastError = destErr;
+                        if (attempt < maxAttempts)
+                        {
+                            int delay = Math.Min(initialDelayMs * attempt, 3000);
+                            _log("NET", $"[Retry] Destination file '{Path.GetFileName(finalOutputPath)}' is busy/locked by reader/SMB ({destErr}). Retrying {attempt}/{maxAttempts} in {delay}ms...");
+                            Thread.Sleep(delay);
+                        }
+                        continue;
+                    }
+
                     try
                     {
-                        if (File.Exists(finalOutputPath))
-                        {
-                            try
-                            {
-                                File.SetAttributes(finalOutputPath, FileAttributes.Normal);
-                                File.Delete(finalOutputPath);
-                            }
-                            catch { /* Ignore and let Move attempt overwrite */ }
-                        }
-
                         File.Move(workingOutputPath, finalOutputPath, overwrite: true);
                         return true;
                     }
                     catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
                     {
+                        lastError = ex.Message;
                         if (attempt < maxAttempts)
                         {
                             int delay = Math.Min(initialDelayMs * attempt, 3000);
-                            _log("NET", $"[Retry] Destination file '{Path.GetFileName(finalOutputPath)}' is busy/locked by indexer or SMB ({ex.Message}). Retrying {attempt}/{maxAttempts} in {delay}ms...");
+                            _log("NET", $"[Retry] Atomic move '{Path.GetFileName(workingOutputPath)}' -> '{Path.GetFileName(finalOutputPath)}' contended ({ex.Message}). Retrying {attempt}/{maxAttempts} in {delay}ms...");
                             Thread.Sleep(delay);
                         }
                     }
                 }
 
-                if (File.Exists(finalOutputPath))
+                if (!TryProbeExclusiveAccess(workingOutputPath, out string? finalWorkErr))
                 {
-                    try
-                    {
-                        File.SetAttributes(finalOutputPath, FileAttributes.Normal);
-                        File.Delete(finalOutputPath);
-                    }
-                    catch (System.Exception __suppressedEx1) { System.Diagnostics.Debug.WriteLine($"[NetworkSafetyService] Non-fatal error ignored: {__suppressedEx1.Message}"); }
-                }
-
-                try
-                {
-                    File.Move(workingOutputPath, finalOutputPath, overwrite: true);
+                    _pendingSwapService?.AddOrUpdate(workingOutputPath, finalOutputPath);
+                    _log("WARN", $"Working partial file '{Path.GetFileName(workingOutputPath)}' remained locked ({finalWorkErr ?? lastError}). Preserved completed encode and queued for automatic swap without modifying '{Path.GetFileName(finalOutputPath)}'.");
                     return true;
                 }
-                catch (Exception ex)
-                {
-                    // Fallback: If destination remains locked (e.g. active stream reader/indexer), preserve the completed encode!
-                    string fallbackNew = finalOutputPath + ".new";
-                    try
-                    {
-                        if (File.Exists(fallbackNew))
-                        {
-                            try
-                            {
-                                File.SetAttributes(fallbackNew, FileAttributes.Normal);
-                                File.Delete(fallbackNew);
-                            }
-                            catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[NetworkSafetyService] Non-fatal error ignored: {__suppressedEx2.Message}"); }
-                        }
 
+                string fallbackNew = finalOutputPath + ".new";
+                try
+                {
+                    if (!File.Exists(fallbackNew) || TryProbeExclusiveAccess(fallbackNew, out _))
+                    {
                         File.Move(workingOutputPath, fallbackNew, overwrite: true);
                         _pendingSwapService?.AddOrUpdate(fallbackNew, finalOutputPath);
-                        _log("WARN", $"Destination '{Path.GetFileName(finalOutputPath)}' was locked by another process (e.g. Plex/SMB). Saved complete encode to '{Path.GetFileName(fallbackNew)}' and queued for automatic swap.");
+                        _log("WARN", $"Destination '{Path.GetFileName(finalOutputPath)}' was locked ({lastError}). Staged complete encode to '{Path.GetFileName(fallbackNew)}' and queued for automatic swap.");
                         return true;
                     }
-                    catch
-                    {
-                        _pendingSwapService?.AddOrUpdate(workingOutputPath, finalOutputPath);
-                        _log("WARN", $"Destination '{Path.GetFileName(finalOutputPath)}' was locked ({ex.Message}). Completed encode preserved at '{Path.GetFileName(workingOutputPath)}' and queued for automatic swap.");
-                        return true; // Return true so caller does not delete the good partial file!
-                    }
                 }
+                catch (Exception exFallback) { Debug.WriteLine($"[NetworkSafetyService] Fallback .new move skipped: {exFallback.Message}"); }
+
+                _pendingSwapService?.AddOrUpdate(workingOutputPath, finalOutputPath);
+                _log("WARN", $"Destination '{Path.GetFileName(finalOutputPath)}' was locked ({lastError}). Completed encode preserved at '{Path.GetFileName(workingOutputPath)}' and queued for automatic swap.");
+                return true;
             }
             catch (Exception ex)
             {
@@ -380,103 +297,14 @@ namespace Housekeeping.Services
             }
         }
 
-        public bool TryAcquireDistributedLock(string finalOutputPath, out IDisposable? lockHandle, out string? conflictMessage)
-        {
-            lockHandle = null;
-            conflictMessage = null;
-
-            var cfg = _getConfig();
-            if (!cfg.EnableDistributedNetworkLocking)
-                return true;
-
-            string lockFilePath = finalOutputPath + ".hklock";
-            int timeoutMinutes = Math.Max(10, cfg.DistributedLockTimeoutMinutes);
-
-            try
-            {
-                if (File.Exists(lockFilePath))
-                {
-                    bool isStale = false;
-                    string existingMachine = "another instance";
-                    try
-                    {
-                        string json = File.ReadAllText(lockFilePath);
-                        var existing = JsonSerializer.Deserialize<DistributedLockInfo>(json);
-                        if (existing != null)
-                        {
-                            existingMachine = string.IsNullOrWhiteSpace(existing.MachineName) ? "another machine" : existing.MachineName;
-                            var age = DateTime.UtcNow - existing.HeartbeatAtUtc;
-                            if (age > TimeSpan.FromMinutes(timeoutMinutes))
-                            {
-                                isStale = true;
-                                _log("WARN", $"[Lock] Found stale lock for '{Path.GetFileName(finalOutputPath)}' from '{existingMachine}' ({age.TotalMinutes:F0} min old). Overriding stale lock.");
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        var lastWrite = File.GetLastWriteTimeUtc(lockFilePath);
-                        if (DateTime.UtcNow - lastWrite > TimeSpan.FromMinutes(timeoutMinutes))
-                        {
-                            isStale = true;
-                        }
-                    }
-
-                    if (isStale)
-                    {
-                        TryDeleteFile(lockFilePath);
-                    }
-                    else
-                    {
-                        conflictMessage = $"Another machine ('{existingMachine}') has locked this file.";
-                        return false;
-                    }
-                }
-
-                var lockInfo = new DistributedLockInfo
-                {
-                    MachineName = Environment.MachineName,
-                    UserName = Environment.UserName,
-                    ProcessId = Environment.ProcessId,
-                    StartedAtUtc = DateTime.UtcNow,
-                    HeartbeatAtUtc = DateTime.UtcNow,
-                    TargetFilePath = finalOutputPath
-                };
-
-                string jsonPayload = JsonSerializer.Serialize(lockInfo, new JsonSerializerOptions { WriteIndented = true });
-                using (var fs = new FileStream(lockFilePath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                using (var writer = new StreamWriter(fs))
-                {
-                    writer.Write(jsonPayload);
-                }
-
-                lockHandle = new DistributedFileLock(lockFilePath, _log);
-                return true;
-            }
-            catch (IOException)
-            {
-                conflictMessage = "Another instance simultaneously acquired the lock for this file.";
-                return false;
-            }
-            catch (Exception ex)
-            {
-                _log("WARN", $"[Lock] Unable to check distributed lock on '{Path.GetFileName(finalOutputPath)}': {ex.Message}");
-                return true;
-            }
-        }
-
         public void DiscardPartialEncode(string workingOutputPath, string finalOutputPath)
         {
-            if (string.IsNullOrWhiteSpace(workingOutputPath))
-                return;
-
+            if (string.IsNullOrWhiteSpace(workingOutputPath)) return;
             if (_pendingSwapService != null && _pendingSwapService.IsPending(workingOutputPath))
             {
                 _log("WARN", $"Preserving completed pending encode from discard: {Path.GetFileName(workingOutputPath)}");
                 return;
             }
-
-            // Only delete if it's a .partial file or incomplete output
             if (!string.Equals(workingOutputPath, finalOutputPath, StringComparison.OrdinalIgnoreCase) && File.Exists(workingOutputPath))
             {
                 if (TryDeleteFile(workingOutputPath))
@@ -484,89 +312,25 @@ namespace Housekeeping.Services
             }
         }
 
-        public int CleanupOrphanedPartials(IEnumerable<string> directories)
-        {
-            int deleted = 0;
-            var cfg = _getConfig();
-            int timeoutMinutes = Math.Max(10, cfg.DistributedLockTimeoutMinutes);
-
-            foreach (string dir in directories)
-            {
-                if (!IsPathReachable(dir)) continue;
-                try
-                {
-                    var partials = Directory.GetFiles(dir, "*.partial.*", SearchOption.AllDirectories);
-                    foreach (var p in partials)
-                    {
-                        if (_pendingSwapService != null && _pendingSwapService.IsPending(p))
-                        {
-                            _log("INFO", $"[PendingSwap] Preserving pending locked encode: {p}");
-                            continue;
-                        }
-
-                        if (TryDeleteFile(p))
-                        {
-                            deleted++;
-                            _log("INFO", $"Removed orphaned partial file from previous interrupted run: {p}");
-                        }
-                    }
-
-                    if (cfg.EnableDistributedNetworkLocking)
-                    {
-                        var locks = Directory.GetFiles(dir, "*.hklock", SearchOption.AllDirectories);
-                        foreach (var lk in locks)
-                        {
-                            try
-                            {
-                                var age = DateTime.UtcNow - File.GetLastWriteTimeUtc(lk);
-                                if (age > TimeSpan.FromMinutes(timeoutMinutes))
-                                {
-                                    if (TryDeleteFile(lk))
-                                    {
-                                        deleted++;
-                                        _log("INFO", $"Removed stale distributed lock file: {Path.GetFileName(lk)}");
-                                    }
-                                }
-                            }
-                            catch (System.Exception __suppressedEx3) { System.Diagnostics.Debug.WriteLine($"[NetworkSafetyService] Non-fatal error ignored: {__suppressedEx3.Message}"); }
-                        }
-                    }
-                }
-                catch (System.Exception __suppressedEx4) { System.Diagnostics.Debug.WriteLine($"[NetworkSafetyService] Non-fatal error ignored: {__suppressedEx4.Message}"); }
-            }
-            return deleted;
-        }
-
         public static bool PurgeZeroByteFileIfExists(string path)
         {
             try
             {
-                if (File.Exists(path))
+                if (File.Exists(path) && new FileInfo(path).Length == 0)
                 {
-                    var fi = new FileInfo(path);
-                    if (fi.Length == 0)
-                    {
-                        File.SetAttributes(path, FileAttributes.Normal);
-                        File.Delete(path);
-                        return true;
-                    }
+                    File.SetAttributes(path, FileAttributes.Normal);
+                    File.Delete(path);
+                    return true;
                 }
             }
-            catch (System.Exception __suppressedEx5) { System.Diagnostics.Debug.WriteLine($"[NetworkSafetyService] Non-fatal error ignored: {__suppressedEx5.Message}"); }
+            catch (Exception ex) { Debug.WriteLine($"[NetworkSafetyService] Non-fatal zero-byte purge error: {ex.Message}"); }
             return false;
         }
 
         public static bool TryDeleteFile(string path)
         {
-            try
-            {
-                if (File.Exists(path))
-                {
-                    File.Delete(path);
-                    return true;
-                }
-            }
-            catch (System.Exception __suppressedEx6) { System.Diagnostics.Debug.WriteLine($"[NetworkSafetyService] Non-fatal error ignored: {__suppressedEx6.Message}"); }
+            try { if (File.Exists(path)) { File.Delete(path); return true; } }
+            catch (Exception ex) { Debug.WriteLine($"[NetworkSafetyService] Non-fatal file delete error: {ex.Message}"); }
             return false;
         }
     }

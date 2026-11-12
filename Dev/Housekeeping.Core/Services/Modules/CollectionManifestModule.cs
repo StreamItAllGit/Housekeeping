@@ -54,7 +54,7 @@ namespace Housekeeping.Services.Modules
     /// Scans multi-target directories across local & network NAS paths, parses filenames, computes hashes or fast inventories,
     /// checks Redump/No-Intro DATs, generates .hash sidecars, and exports unified CSV/JSON/HTML reports.
     /// </summary>
-    public static class CollectionManifestModule
+    public static partial class CollectionManifestModule
     {
         private static readonly Regex MediaYearRegex = new(@"(?<=\b|\()(?<year>19\d{2}|20\d{2})(?=\b|\))", RegexOptions.Compiled);
         private static readonly Regex MediaResRegex = new(@"(?<res>4K|2160p|1080p|720p|480p|576p|UHD)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -69,14 +69,8 @@ namespace Housekeeping.Services.Modules
             if (string.IsNullOrEmpty(pattern)) return null;
             return CustomRuleRegexCache.GetOrAdd(pattern, p =>
             {
-                try
-                {
-                    return new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(250));
-                }
-                catch
-                {
-                    return null;
-                }
+                try { return new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromMilliseconds(250)); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[CollectionManifestModule] Regex cache compile skipped: {ex.Message}"); return null; }
             });
         }
 
@@ -118,9 +112,9 @@ namespace Housekeeping.Services.Modules
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Ignore probing exceptions
+                System.Diagnostics.Debug.WriteLine($"[CollectionManifestModule] Sister-app probe skipped: {ex.Message}");
             }
             if (shadowLibPresent)
             {
@@ -143,6 +137,24 @@ namespace Housekeeping.Services.Modules
                     ctx.Stats.Skipped++;
                     continue;
                 }
+
+                if (cfg.SkipShadowLibraryManagedRoots && SisterAppCoexistenceService.IsShadowLibraryManagedRoot(rule.FolderPath))
+                {
+                    ctx.Log("INFO", $"[Coexistence] Skipping ShadowLibrary-managed root '{rule.FolderPath}' (SkipShadowLibraryManagedRoots=true).");
+                    ctx.Stats.Skipped++;
+                    continue;
+                }
+
+                if (NetworkSafetyService.HasActiveDirectoryOrParentLock(rule.FolderPath, out DirectorySentinelLockPayload? activeSentinel, scanImmediateSubdirectories: true))
+                {
+                    ctx.Log("WARN", $"[Coexistence] Deferring '{rule.FolderPath}' — active '{activeSentinel?.Operation}' lock held by {activeSentinel?.AppId} (PID {activeSentinel?.Pid}).");
+                    ctx.Stats.Skipped++;
+                    continue;
+                }
+
+                using var manifestSentinel = (!ctx.IsDryRun && (cfg.CreateMissingHashFiles || cfg.EnableBitRotAutoHeal))
+                    ? NetworkSafetyService.AcquireDirectorySentinelLock(rule.FolderPath, "manifest_audit")
+                    : null;
 
                 // Resolve System / Category
                 string systemName = rule.SystemSelection;
@@ -550,6 +562,16 @@ namespace Housekeeping.Services.Modules
 
                                 if (isArchive && cfg.CheckInnerArchiveAndContainer)
                                 {
+                                    if (HashSidecarService.TryGetVerifiedOuterArchiveRecord(fi.FullName, out var regRec) && regRec != null)
+                                    {
+                                        record.Crc32 = !string.IsNullOrWhiteSpace(regRec.PrimaryInnerCrc32) ? regRec.PrimaryInnerCrc32 : regRec.ContainerCrc32;
+                                        record.Md5 = !string.IsNullOrWhiteSpace(regRec.PrimaryInnerMd5) ? regRec.PrimaryInnerMd5 : regRec.ContainerMd5;
+                                        record.Sha1 = !string.IsNullOrWhiteSpace(regRec.PrimaryInnerSha1) ? regRec.PrimaryInnerSha1 : regRec.ContainerSha1;
+                                        record.IntegrityStatus = "Verified";
+                                        record.IntegrityDetail = "Container Verified (.archive_hashes.json Fast Hit)";
+                                    }
+                                    else
+                                    {
                                     // Two-Step Archive Bit Rot Engine (ShadowLibrary Parity)
                                     var sidecarVerify = await HashSidecarService.VerifySidecarForTargetAsync(
                                         sevenZip,
@@ -663,24 +685,28 @@ namespace Housekeeping.Services.Modules
                                             string sidecarContent = HashSidecarService.GenerateSidecarContentForFiles(baseTitle, payloadFiles.Count > 0 ? payloadFiles : new[] { containerHash }, containerHash);
                                             string stdSidecar = HashSidecarService.GetStandardSidecarPath(fi.FullName);
 
-                                            if (effectivePlacement == HashSidecarMode.PackageInsideArchive && HashSidecarService.IsWritableArchiveFilePath(fi.FullName))
+                                            if ((effectivePlacement == HashSidecarMode.SidecarBeside || effectivePlacement == HashSidecarMode.SidecarAndArchive) ||
+                                                !HashSidecarService.IsWritableArchiveFilePath(fi.FullName))
+                                            {
+                                                await File.WriteAllTextAsync(stdSidecar, sidecarContent, Utf8NoBom, ct);
+                                            }
+
+                                            if ((effectivePlacement == HashSidecarMode.PackageInsideArchive || effectivePlacement == HashSidecarMode.SidecarAndArchive) &&
+                                                HashSidecarService.IsWritableArchiveFilePath(fi.FullName))
                                             {
                                                 string tempDir = Path.Combine(Path.GetTempPath(), "hk_hash_" + Guid.NewGuid().ToString("N"));
                                                 Directory.CreateDirectory(tempDir);
                                                 string tempSidecar = Path.Combine(tempDir, $"{baseTitle}.hash");
                                                 try
                                                 {
-                                                    await File.WriteAllTextAsync(tempSidecar, sidecarContent, Encoding.UTF8, ct);
-                                                    await HashSidecarService.InjectSidecarIntoArchiveAsync(sevenZip, fi.FullName, tempSidecar, ct);
+                                                    await File.WriteAllTextAsync(tempSidecar, sidecarContent, Utf8NoBom, ct);
+                                                    await HashSidecarService.InjectSidecarIntoArchiveAsync(sevenZip, fi.FullName, tempSidecar, ct, cfg.SyncPostInjectionContainerHashJson);
                                                 }
                                                 finally
                                                 {
-                                                    try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); } catch { }
+                                                    try { if (Directory.Exists(tempDir)) Directory.Delete(tempDir, recursive: true); }
+                                                    catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[CollectionManifestModule] Temp sidecar cleanup skipped: {ex.Message}"); }
                                                 }
-                                            }
-                                            else
-                                            {
-                                                await File.WriteAllTextAsync(stdSidecar, sidecarContent, Encoding.UTF8, ct);
                                             }
 
                                             record.IntegrityStatus = "Baseline Captured";
@@ -696,6 +722,7 @@ namespace Housekeeping.Services.Modules
                                             record.IntegrityStatus = "Missing";
                                             record.IntegrityDetail = "No .hash sidecar found";
                                         }
+                                    }
                                     }
                                 }
                                 else
@@ -881,313 +908,6 @@ namespace Housekeeping.Services.Modules
             }
 
             return item;
-        }
-
-        public static Dictionary<string, string> ApplyFieldParseRules(
-            string fileName,
-            string relativePath,
-            string fullPath,
-            List<ManifestFieldParseRule>? rules)
-        {
-            var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            if (rules == null || rules.Count == 0) return dict;
-
-            string parentFolderName = "";
-            try
-            {
-                parentFolderName = Path.GetFileName(Path.GetDirectoryName(fullPath) ?? "") ?? "";
-            }
-            catch (System.Exception __suppressedEx8) { System.Diagnostics.Debug.WriteLine($"[CollectionManifestModule] Non-fatal error ignored: {__suppressedEx8.Message}"); }
-
-            string fileNameWithoutExt = "";
-            try { fileNameWithoutExt = Path.GetFileNameWithoutExtension(fileName); } catch { fileNameWithoutExt = fileName; }
-
-            string fileExt = "";
-            try { fileExt = Path.GetExtension(fileName).ToLowerInvariant(); } catch (System.Exception __suppressedEx9) { System.Diagnostics.Debug.WriteLine($"[CollectionManifestModule] Non-fatal error ignored: {__suppressedEx9.Message}"); }
-
-            foreach (var rule in rules.Where(r => r.Enabled && !string.IsNullOrWhiteSpace(r.ColumnName)))
-            {
-                // Verify Extension Scoping Filter (prevents video regex from executing on music or roms)
-                if (!string.IsNullOrWhiteSpace(rule.FileExtensionFilter) && rule.FileExtensionFilter != "*" && rule.FileExtensionFilter != "* (All Files)")
-                {
-                    var allowedExts = rule.FileExtensionFilter.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                        .Select(e => e.StartsWith('.') ? e.ToLowerInvariant() : "." + e.ToLowerInvariant())
-                        .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-                    if (!allowedExts.Contains("*") && !allowedExts.Contains(".*") && !allowedExts.Contains(fileExt))
-                    {
-                        continue; // Bypassed: rule does not apply to this file extension
-                    }
-                }
-
-                string textToInspect = rule.InspectTarget switch
-                {
-                    ManifestInspectTarget.FileNameWithoutExtension => fileNameWithoutExt,
-                    ManifestInspectTarget.ParentFolderName => parentFolderName,
-                    ManifestInspectTarget.RelativePath => relativePath,
-                    ManifestInspectTarget.FullPath => fullPath,
-                    _ => fileName
-                };
-
-                if (string.IsNullOrEmpty(textToInspect))
-                    continue;
-
-                if (rule.MatchMode != ManifestMatchMode.SplitToken && string.IsNullOrEmpty(rule.Pattern))
-                    continue;
-
-                try
-                {
-                    switch (rule.MatchMode)
-                    {
-                        case ManifestMatchMode.RegexNamedCapture:
-                            var regex = GetOrCreateCachedRegex(rule.Pattern);
-                            if (regex != null)
-                            {
-                                var match = regex.Match(textToInspect);
-                                if (match.Success)
-                                {
-                                    var group = match.Groups[rule.ColumnName];
-                                    if (group.Success && !string.IsNullOrWhiteSpace(group.Value))
-                                    {
-                                        dict[rule.ColumnName] = group.Value.Trim();
-                                    }
-                                    else
-                                    {
-                                        string val = !string.IsNullOrWhiteSpace(rule.AssignedValue)
-                                            ? match.Result(rule.AssignedValue)
-                                            : match.Value;
-                                        dict[rule.ColumnName] = val.Trim();
-                                    }
-                                }
-                            }
-                            break;
-
-                        case ManifestMatchMode.RegexPattern:
-                            var regPattern = GetOrCreateCachedRegex(rule.Pattern);
-                            if (regPattern != null)
-                            {
-                                var pMatch = regPattern.Match(textToInspect);
-                                if (pMatch.Success)
-                                {
-                                    string val = !string.IsNullOrWhiteSpace(rule.AssignedValue)
-                                        ? pMatch.Result(rule.AssignedValue)
-                                        : pMatch.Value;
-                                    dict[rule.ColumnName] = val.Trim();
-                                }
-                            }
-                            break;
-
-                        case ManifestMatchMode.TextContains:
-                            if (textToInspect.Contains(rule.Pattern, StringComparison.OrdinalIgnoreCase))
-                            {
-                                dict[rule.ColumnName] = !string.IsNullOrWhiteSpace(rule.AssignedValue) ? rule.AssignedValue : rule.Pattern;
-                            }
-                            break;
-
-                        case ManifestMatchMode.SplitToken:
-                            string delim = string.IsNullOrEmpty(rule.SplitDelimiter) ? " - " : rule.SplitDelimiter;
-                            string[] tokens = textToInspect.Split(new[] { delim }, StringSplitOptions.None);
-                            if (rule.SplitIndex >= 0 && rule.SplitIndex < tokens.Length)
-                            {
-                                dict[rule.ColumnName] = tokens[rule.SplitIndex].Trim();
-                            }
-                            break;
-                    }
-                }
-                catch (System.Exception __suppressedEx10) { System.Diagnostics.Debug.WriteLine($"[CollectionManifestModule] Non-fatal error ignored: {__suppressedEx10.Message}"); }
-            }
-
-            return dict;
-        }
-
-        private static async Task ExportManifestsAsync(
-            List<ManifestRecordItem> records,
-            string outputDirectory,
-            string baseFileName,
-            CollectionManifestConfig cfg,
-            Action<string, string> log,
-            CancellationToken ct)
-        {
-            if (!Directory.Exists(outputDirectory))
-                Directory.CreateDirectory(outputDirectory);
-
-            var customCols = (cfg.FieldParseRules ?? new())
-                .Where(r => r.Enabled && !string.IsNullOrWhiteSpace(r.ColumnName))
-                .Select(r => r.ColumnName.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            // CSV Export
-            if (cfg.ExportCsv)
-            {
-                string csvPath = Path.Combine(outputDirectory, $"{baseFileName}.csv");
-                var sb = new StringBuilder();
-                string stdHeader = "LocationId,RootPath,RelativePath,FileName,CleanTitle,Category,YearOrRegion,ResolutionOrTags,FileSizeBytes,FileSizeFormatted,CRC32,SHA1,MD5,IntegrityStatus,IntegrityDetail";
-                sb.AppendLine(customCols.Count > 0 ? $"{stdHeader},{string.Join(",", customCols)}" : stdHeader);
-
-                foreach (var r in records)
-                {
-                    string stdRow = $"\"{EscapeCsv(r.LocationId)}\",\"{EscapeCsv(r.RootPath)}\",\"{EscapeCsv(r.RelativePath)}\",\"{EscapeCsv(r.FileName)}\",\"{EscapeCsv(r.CleanTitle)}\",\"{EscapeCsv(r.Category)}\",\"{EscapeCsv(r.YearOrRegion)}\",\"{EscapeCsv(r.ResolutionOrTags)}\",{r.FileSizeBytes},\"{r.FileSizeFormatted}\",\"{r.Crc32}\",\"{r.Sha1}\",\"{r.Md5}\",\"{r.IntegrityStatus}\",\"{EscapeCsv(r.IntegrityDetail)}\"";
-                    if (customCols.Count > 0)
-                    {
-                        var customVals = customCols.Select(c => $"\"{EscapeCsv(r.CustomFields.TryGetValue(c, out var v) ? v : "")}\"");
-                        sb.AppendLine($"{stdRow},{string.Join(",", customVals)}");
-                    }
-                    else
-                    {
-                        sb.AppendLine(stdRow);
-                    }
-                }
-                await File.WriteAllTextAsync(csvPath, sb.ToString(), Encoding.UTF8, ct);
-                log("SUCCESS", $"Exported Manifest CSV: {csvPath}");
-
-                MirrorIfConfigured(csvPath, cfg.SecondaryMirrorFolder, log);
-            }
-
-            // JSON Export
-            if (cfg.ExportJson)
-            {
-                string jsonPath = Path.Combine(outputDirectory, $"{baseFileName}.json");
-                var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
-                string json = JsonSerializer.Serialize(records, jsonOptions);
-                await File.WriteAllTextAsync(jsonPath, json, Encoding.UTF8, ct);
-                log("SUCCESS", $"Exported Manifest JSON: {jsonPath}");
-
-                MirrorIfConfigured(jsonPath, cfg.SecondaryMirrorFolder, log);
-            }
-
-            // HTML Report Export
-            if (cfg.ExportHtmlReport)
-            {
-                string htmlPath = Path.Combine(outputDirectory, $"{baseFileName}_report.html");
-                string html = GenerateHtmlReport(records, baseFileName, customCols);
-                await File.WriteAllTextAsync(htmlPath, html, Encoding.UTF8, ct);
-                log("SUCCESS", $"Exported Manifest HTML Visual Report: {htmlPath}");
-
-                MirrorIfConfigured(htmlPath, cfg.SecondaryMirrorFolder, log);
-            }
-        }
-
-        private static void MirrorIfConfigured(string sourceFile, string? mirrorFolder, Action<string, string> log)
-        {
-            if (string.IsNullOrWhiteSpace(mirrorFolder)) return;
-            try
-            {
-                if (!Directory.Exists(mirrorFolder)) Directory.CreateDirectory(mirrorFolder);
-                string dest = Path.Combine(mirrorFolder, Path.GetFileName(sourceFile));
-                File.Copy(sourceFile, dest, overwrite: true);
-                log("INFO", $"Mirrored manifest to secondary storage: {dest}");
-            }
-            catch (Exception ex)
-            {
-                log("WARN", $"Failed mirroring to '{mirrorFolder}': {ex.Message}");
-            }
-        }
-
-        private static string EscapeCsv(string s) => (s ?? "").Replace("\"", "\"\"");
-
-        public static string GenerateHtmlReport(List<ManifestRecordItem> records, string title, List<string>? customCols = null)
-        {
-            int total = records.Count;
-            int verified = records.Count(r => r.IntegrityStatus == "Verified" || r.IntegrityStatus == "Match");
-            int captured = records.Count(r => r.IntegrityStatus == "Baseline Captured");
-            int warnings = records.Count(r => r.IntegrityStatus == "Bit Rot Warning" || r.IntegrityStatus == "Mismatch");
-            int missingOrNa = records.Count(r => r.IntegrityStatus == "Missing" || r.IntegrityStatus == "N/A");
-            customCols ??= new List<string>();
-            string safeTitle = WebUtility.HtmlEncode(title ?? "Media & Collection Manifest");
-
-            var sb = new StringBuilder();
-            sb.AppendLine("<!DOCTYPE html>");
-            sb.AppendLine("<html lang='en'>");
-            sb.AppendLine("<head>");
-            sb.AppendLine("  <meta charset='utf-8'/>");
-            sb.AppendLine($"  <title>{safeTitle} — Housekeeping Audit Report</title>");
-            sb.AppendLine("  <style>");
-            sb.AppendLine("    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 24px; }");
-            sb.AppendLine("    h1 { margin-top: 0; color: #38bdf8; font-size: 24px; }");
-            sb.AppendLine("    .stats { display: flex; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }");
-            sb.AppendLine("    .card { background: #1e293b; padding: 16px 20px; border-radius: 8px; flex: 1; min-width: 160px; border: 1px solid #334155; }");
-            sb.AppendLine("    .card-num { font-size: 28px; font-weight: bold; margin-bottom: 4px; }");
-            sb.AppendLine("    .badge-match { color: #4ade80; }");
-            sb.AppendLine("    .badge-captured { color: #38bdf8; }");
-            sb.AppendLine("    .badge-mismatch { color: #f87171; }");
-            sb.AppendLine("    .badge-na { color: #94a3b8; }");
-            sb.AppendLine("    input[type=text] { width: 100%; box-sizing: border-box; padding: 12px; background: #1e293b; border: 1px solid #475569; color: #f8fafc; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }");
-            sb.AppendLine("    table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; border: 1px solid #334155; }");
-            sb.AppendLine("    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #334155; font-size: 12.5px; }");
-            sb.AppendLine("    th { background: #0f172a; color: #94a3b8; font-weight: 600; }");
-            sb.AppendLine("    tr:hover { background: #243247; }");
-            sb.AppendLine("    .pill { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: bold; }");
-            sb.AppendLine("    .pill-Verified { background: #065f46; color: #34d399; }");
-            sb.AppendLine("    .pill-Baseline { background: #0e7490; color: #38bdf8; }");
-            sb.AppendLine("    .pill-Warning { background: #7f1d1d; color: #f87171; }");
-            sb.AppendLine("    .pill-Missing { background: #78350f; color: #fbbf24; }");
-            sb.AppendLine("    .pill-NA { background: #334155; color: #cbd5e1; }");
-            sb.AppendLine("    .tag-custom { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; background: #1e3a8a; color: #93c5fd; }");
-            sb.AppendLine("  </style>");
-            sb.AppendLine("</head>");
-            sb.AppendLine("<body>");
-            sb.AppendLine($"  <h1>📋 {safeTitle}</h1>");
-            sb.AppendLine($"  <p style='color: #94a3b8;'>Generated by Housekeeping • {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC</p>");
-            sb.AppendLine("  <div class='stats'>");
-            sb.AppendLine($"    <div class='card'><div class='card-num'>{total}</div><div style='color:#94a3b8;'>Total Items</div></div>");
-            sb.AppendLine($"    <div class='card'><div class='card-num badge-match'>{verified}</div><div style='color:#94a3b8;'>Verified (No Bit Rot)</div></div>");
-            sb.AppendLine($"    <div class='card'><div class='card-num badge-captured'>{captured}</div><div style='color:#94a3b8;'>Baseline Captured</div></div>");
-            sb.AppendLine($"    <div class='card'><div class='card-num badge-mismatch'>{warnings}</div><div style='color:#94a3b8;'>Bit Rot Warnings</div></div>");
-            sb.AppendLine($"    <div class='card'><div class='card-num badge-na'>{missingOrNa}</div><div style='color:#94a3b8;'>Missing .hash / N/A</div></div>");
-            sb.AppendLine("  </div>");
-            sb.AppendLine("  <input type='text' id='search' placeholder='🔍 Search items by title, location, category, CRC32, SHA-1, or custom fields...' onkeyup='filterTable()'>");
-            sb.AppendLine("  <table id='auditTable'>");
-
-            sb.Append("    <thead><tr><th>Location</th><th>File / Title</th><th>Category</th><th>Size</th><th>CRC32</th><th>SHA-1</th><th>Integrity Status</th><th>Detail</th>");
-            foreach (var col in customCols) sb.Append($"<th>{WebUtility.HtmlEncode(col)}</th>");
-            sb.AppendLine("</tr></thead>");
-            sb.AppendLine("    <tbody>");
-
-            foreach (var r in records)
-            {
-                string pillClass = r.IntegrityStatus switch
-                {
-                    "Verified" or "Match" => "pill-Verified",
-                    "Baseline Captured" => "pill-Baseline",
-                    "Bit Rot Warning" or "Mismatch" => "pill-Warning",
-                    "Missing" => "pill-Missing",
-                    _ => "pill-NA"
-                };
-                string safeLoc = WebUtility.HtmlEncode(r.LocationId);
-                string safeFile = WebUtility.HtmlEncode(r.FileName);
-                string safeCat = WebUtility.HtmlEncode(r.Category);
-                string safeCrc = WebUtility.HtmlEncode(r.Crc32);
-                string safeSha = WebUtility.HtmlEncode(r.Sha1);
-                string safeStatus = WebUtility.HtmlEncode(r.IntegrityStatus);
-                string safeDetail = WebUtility.HtmlEncode(r.IntegrityDetail);
-
-                sb.Append($"      <tr><td><b>{safeLoc}</b></td><td>{safeFile}</td><td>{safeCat}</td><td>{r.FileSizeFormatted}</td><td><code>{safeCrc}</code></td><td><code>{safeSha}</code></td><td><span class='pill {pillClass}'>{safeStatus}</span></td><td>{safeDetail}</td>");
-                foreach (var col in customCols)
-                {
-                    string val = r.CustomFields.TryGetValue(col, out var cv) ? cv : "";
-                    string safeVal = WebUtility.HtmlEncode(val);
-                    sb.Append($"<td>{(string.IsNullOrWhiteSpace(val) ? "—" : $"<span class='tag-custom'>{safeVal}</span>")}</td>");
-                }
-                sb.AppendLine("</tr>");
-            }
-
-            sb.AppendLine("    </tbody>");
-            sb.AppendLine("  </table>");
-            sb.AppendLine("  <script>");
-            sb.AppendLine("    function filterTable() {");
-            sb.AppendLine("      var input = document.getElementById('search').value.toLowerCase();");
-            sb.AppendLine("      var rows = document.getElementById('auditTable').getElementsByTagName('tbody')[0].getElementsByTagName('tr');");
-            sb.AppendLine("      for (var i = 0; i < rows.length; i++) {");
-            sb.AppendLine("        var text = rows[i].textContent.toLowerCase();");
-            sb.AppendLine("        rows[i].style.display = text.indexOf(input) > -1 ? '' : 'none';");
-            sb.AppendLine("      }");
-            sb.AppendLine("    }");
-            sb.AppendLine("  </script>");
-            sb.AppendLine("</body>");
-            sb.AppendLine("</html>");
-
-            return sb.ToString();
         }
     }
 }

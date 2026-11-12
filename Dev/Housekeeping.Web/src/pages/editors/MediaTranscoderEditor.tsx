@@ -1,8 +1,14 @@
+// @module: Housekeeping.Web/pages/editors/MediaTranscoderEditor
+// @purpose: Module 1 configuration editor using SourceQualityTierMatrix, ProfileSelect dropdowns, and Standard 09 2-line hover hints.
+// @depends-on: react, ../../components/HybridPathPicker, ../../components/ProfileSelect, ../../context/AppStateContext, ../../hints/mediaTranscoder, ./transcoder/SourceQualityTierMatrix
+// @exports: MediaTranscoderEditor
 import React from 'react';
-import { ComboSelect } from '../../components/ComboSelect';
 import { HybridPathPicker } from '../../components/HybridPathPicker';
+import { ProfileSelect } from '../../components/ProfileSelect';
 import { useAppState } from '../../context/AppStateContext';
+import { MEDIA_TRANSCODER_HINTS } from '../../hints/mediaTranscoder';
 import type { MediaTranscoderConfig, SourceDetectionMode } from '../../types/models';
+import { SourceQualityTierMatrix, TIER_RES_KEYS } from './transcoder/SourceQualityTierMatrix';
 
 interface Props {
   cfg: MediaTranscoderConfig;
@@ -16,30 +22,6 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
     ...(config?.HandBrakeProfiles || []).map((p) => p.ProfileId),
   ];
 
-  const tierResKeys: {
-    flag: keyof Pick<
-      MediaTranscoderConfig,
-      'Enable144p' | 'Enable240p' | 'Enable360p' | 'Enable480p' | 'Enable720p' | 'Enable1080p' | 'Enable4K'
-    >;
-    label: string;
-    prop:
-      | 'Profile144p'
-      | 'Profile240p'
-      | 'Profile360p'
-      | 'Profile480p'
-      | 'Profile720p'
-      | 'Profile1080p'
-      | 'Profile4K';
-  }[] = [
-    { flag: 'Enable144p', label: '144p', prop: 'Profile144p' },
-    { flag: 'Enable240p', label: '240p', prop: 'Profile240p' },
-    { flag: 'Enable360p', label: '360p', prop: 'Profile360p' },
-    { flag: 'Enable480p', label: '480p', prop: 'Profile480p' },
-    { flag: 'Enable720p', label: '720p', prop: 'Profile720p' },
-    { flag: 'Enable1080p', label: '1080p', prop: 'Profile1080p' },
-    { flag: 'Enable4K', label: '4K UHD', prop: 'Profile4K' },
-  ];
-
   return (
     <>
       <div className="hk-info-banner">
@@ -47,7 +29,7 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
           Scans media drives and custom folders for master video files, generating optimized
           multi-resolution HEVC streaming tiers (144p–4K) and optional alternate-language editions
-          with atomic <code>.partial</code> writes and Pending Swaps.
+          with atomic <code>.partial</code> writes, safe exclusive SMB pre-probes, and Pending Swaps.
         </div>
       </div>
 
@@ -108,17 +90,27 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
 
         <div className="hk-row" style={{ justifyContent: 'space-between', marginBottom: 10 }}>
           <div className="hk-row" style={{ gap: 16 }}>
-            <label className="hk-checkbox-label">
+            <label
+              className="hk-checkbox-label hk-has-hint"
+              title={MEDIA_TRANSCODER_HINTS.reEncodeNonHevc}
+            >
               <input
                 type="checkbox"
+                className="hk-has-hint"
+                title={MEDIA_TRANSCODER_HINTS.reEncodeNonHevc}
                 checked={cfg.ReEncodeNonHevcOutputs}
                 onChange={(e) => onChange((d) => (d.ReEncodeNonHevcOutputs = e.target.checked))}
               />
               Re-Encode Existing Non-HEVC Outputs
             </label>
-            <label className="hk-checkbox-label">
+            <label
+              className="hk-checkbox-label hk-has-hint"
+              title={MEDIA_TRANSCODER_HINTS.remoteSkipMediaInfo}
+            >
               <input
                 type="checkbox"
+                className="hk-has-hint"
+                title={MEDIA_TRANSCODER_HINTS.remoteSkipMediaInfo}
                 checked={cfg.RemoteModeSkipMediaInfo}
                 onChange={(e) => onChange((d) => (d.RemoteModeSkipMediaInfo = e.target.checked))}
               />
@@ -147,10 +139,16 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
 
         <div className="hk-row" style={{ gap: 14, paddingTop: 6, borderTop: '1px solid var(--border-subtle)' }}>
           <strong style={{ fontSize: 12 }}>Active Output Tiers:</strong>
-          {tierResKeys.map((t) => (
-            <label key={t.flag} className="hk-checkbox-label">
+          {TIER_RES_KEYS.map((t) => (
+            <label
+              key={t.flag}
+              className="hk-checkbox-label hk-has-hint"
+              title={MEDIA_TRANSCODER_HINTS.tierToggle(t.label)}
+            >
               <input
                 type="checkbox"
+                className="hk-has-hint"
+                title={MEDIA_TRANSCODER_HINTS.tierToggle(t.label)}
                 checked={Boolean(cfg[t.flag])}
                 onChange={(e) =>
                   onChange((d) => {
@@ -164,141 +162,8 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
         </div>
       </div>
 
-      {/* Source Quality Tiers Matrix */}
-      <div className="hk-card">
-        <div className="hk-card-header">
-          <div>
-            <h3 className="hk-card-title">📊 Source Quality Tier → Output Profile Matrix</h3>
-            <p className="hk-card-subtitle">
-              Map each source quality tier (DVD, Blu-Ray, 4K UHD) to HandBrake profiles per target resolution.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="hk-btn sm primary"
-            onClick={() =>
-              onChange((d) => {
-                d.SourceTiers.push({
-                  Enabled: true,
-                  TierName: 'Custom Tier',
-                  SourceTagsCsv: 'WEB',
-                  MaxSourceHeightPx: 1080,
-                  Profile144p: 'Tier_144p',
-                  Profile240p: 'Tier_240p',
-                  Profile360p: 'Tier_360p',
-                  Profile480p: 'Tier_480p',
-                  Profile720p: 'Tier_720p',
-                  Profile1080p: 'Tier_1080p',
-                  Profile4K: '(Disabled)',
-                });
-              })
-            }
-          >
-            + Add Source Tier
-          </button>
-        </div>
+      <SourceQualityTierMatrix cfg={cfg} profileOptions={profileOptions} onChange={onChange} />
 
-        <div className="table-wrapper" tabIndex={0} role="region" aria-label="Source quality tiers">
-          <table className="hk-table">
-            <thead>
-              <tr>
-                <th>On</th>
-                <th>Tier Name</th>
-                <th>Filename Tags</th>
-                <th>Max H (px)</th>
-                {tierResKeys.map((t) => (
-                  <th key={t.label}>{t.label}</th>
-                ))}
-                <th>Del</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(cfg.SourceTiers || []).map((tier, idx) => (
-                <tr key={idx}>
-                  <td>
-                    <input
-                      type="checkbox"
-                      checked={tier.Enabled}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.SourceTiers[idx].Enabled = e.target.checked;
-                        })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      className="hk-input"
-                      style={{ minWidth: 130 }}
-                      value={tier.TierName}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.SourceTiers[idx].TierName = e.target.value;
-                        })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="text"
-                      className="hk-input mono"
-                      style={{ minWidth: 120 }}
-                      value={tier.SourceTagsCsv}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.SourceTiers[idx].SourceTagsCsv = e.target.value;
-                        })
-                      }
-                    />
-                  </td>
-                  <td>
-                    <input
-                      type="number"
-                      className="hk-input"
-                      style={{ width: 82 }}
-                      value={tier.MaxSourceHeightPx}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.SourceTiers[idx].MaxSourceHeightPx = Number(e.target.value) || 1080;
-                        })
-                      }
-                    />
-                  </td>
-                  {tierResKeys.map((t) => (
-                    <td key={t.prop} style={{ minWidth: 138 }}>
-                      <ComboSelect
-                        value={tier[t.prop]}
-                        options={profileOptions}
-                        onChange={(v) =>
-                          onChange((d) => {
-                            d.SourceTiers[idx][t.prop] = v;
-                          })
-                        }
-                      />
-                    </td>
-                  ))}
-                  <td>
-                    <button
-                      type="button"
-                      className="hk-btn sm danger"
-                      onClick={() =>
-                        onChange((d) => {
-                          d.SourceTiers.splice(idx, 1);
-                        })
-                      }
-                    >
-                      ✕
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Custom Folders + Language Edition Rules */}
       <div className="hk-grid-2">
         <div className="hk-card">
           <div className="hk-card-header">
@@ -306,11 +171,7 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
             <button
               type="button"
               className="hk-btn sm primary"
-              onClick={() =>
-                onChange((d) => {
-                  d.CustomFoldersToScan.push({ Enabled: true, Path: '' });
-                })
-              }
+              onClick={() => onChange((d) => d.CustomFoldersToScan.push({ Enabled: true, Path: '' }))}
             >
               + Add Folder
             </button>
@@ -319,9 +180,15 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
             <table className="hk-table">
               <thead>
                 <tr>
-                  <th style={{ width: 50 }}>On</th>
-                  <th>Path</th>
-                  <th style={{ width: 60 }}>Del</th>
+                  <th className="hk-has-hint" style={{ width: 50 }} title={MEDIA_TRANSCODER_HINTS.thTierOn}>
+                    On
+                  </th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thCustomPath}>
+                    Path
+                  </th>
+                  <th className="hk-has-hint" style={{ width: 60 }} title={MEDIA_TRANSCODER_HINTS.thDelete}>
+                    Del
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -337,6 +204,8 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
                     <td>
                       <input
                         type="checkbox"
+                        className="hk-has-hint"
+                        title={MEDIA_TRANSCODER_HINTS.customFolderEnabled}
                         checked={f.Enabled}
                         onChange={(e) =>
                           onChange((d) => {
@@ -360,11 +229,7 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
                       <button
                         type="button"
                         className="hk-btn sm danger"
-                        onClick={() =>
-                          onChange((d) => {
-                            d.CustomFoldersToScan.splice(idx, 1);
-                          })
-                        }
+                        onClick={() => onChange((d) => d.CustomFoldersToScan.splice(idx, 1))}
                       >
                         ✕
                       </button>
@@ -401,12 +266,12 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
             <table className="hk-table">
               <thead>
                 <tr>
-                  <th>On</th>
-                  <th>ISO Lang</th>
-                  <th>Folder Prefix</th>
-                  <th>Res Tag</th>
-                  <th>Profile</th>
-                  <th>Del</th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thTierOn}>On</th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thIsoLang}>ISO Lang</th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thLangPrefix}>Folder Prefix</th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thResTag}>Res Tag</th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thLangProfile}>Profile</th>
+                  <th className="hk-has-hint" title={MEDIA_TRANSCODER_HINTS.thDelete}>Del</th>
                 </tr>
               </thead>
               <tbody>
@@ -415,6 +280,8 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
                     <td>
                       <input
                         type="checkbox"
+                        className="hk-has-hint"
+                        title={MEDIA_TRANSCODER_HINTS.editionRuleEnabled}
                         checked={r.Enabled}
                         onChange={(e) =>
                           onChange((d) => {
@@ -462,9 +329,10 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
                       />
                     </td>
                     <td>
-                      <ComboSelect
+                      <ProfileSelect
                         value={r.HandBrakeProfileId}
                         options={profileOptions}
+                        ariaLabel={`${r.LanguageCode} HandBrake profile`}
                         onChange={(v) =>
                           onChange((d) => {
                             d.LanguageEditionRules[idx].HandBrakeProfileId = v;
@@ -476,11 +344,7 @@ export const MediaTranscoderEditor: React.FC<Props> = ({ cfg, onChange }) => {
                       <button
                         type="button"
                         className="hk-btn sm danger"
-                        onClick={() =>
-                          onChange((d) => {
-                            d.LanguageEditionRules.splice(idx, 1);
-                          })
-                        }
+                        onClick={() => onChange((d) => d.LanguageEditionRules.splice(idx, 1))}
                       >
                         ✕
                       </button>

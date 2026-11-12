@@ -1,7 +1,13 @@
+// @module: Housekeeping.Web/pages/editors/CloudSyncEditor
+// @purpose: Module 5 (Cloud Folder Sync via rclone) editor with CoexistenceWarningBanner and 2-line hover hints.
+// @depends-on: react, ../../components/CoexistenceWarningBanner, ../../components/ComboSelect, ../../components/HybridPathPicker, ../../context/AppStateContext, ../../hints/cloudSync, ../../services/apiClient
+// @exports: CloudSyncEditor
 import React, { useEffect, useState } from 'react';
+import { CoexistenceWarningBanner } from '../../components/CoexistenceWarningBanner';
 import { ComboSelect } from '../../components/ComboSelect';
 import { HybridPathPicker } from '../../components/HybridPathPicker';
 import { useAppState } from '../../context/AppStateContext';
+import { CLOUD_SYNC_HINTS } from '../../hints/cloudSync';
 import { apiClient } from '../../services/apiClient';
 import type { CloudSyncConfig } from '../../types/models';
 
@@ -20,7 +26,7 @@ export const CloudSyncEditor: React.FC<Props> = ({ jobId, cfg, onChange }) => {
     apiClient
       .getModulesCatalog()
       .then((res) => setRemotes(res.rcloneRemotes || []))
-      .catch(() => {});
+      .catch((err) => console.debug('[CloudSyncEditor] rclone catalog probe skipped:', err));
   }, []);
 
   const handleRefreshRemotes = async () => {
@@ -54,9 +60,12 @@ export const CloudSyncEditor: React.FC<Props> = ({ jobId, cfg, onChange }) => {
         <strong>☁ What This Module Does: Cloud Folder Sync (rclone)</strong>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
           Synchronizes local directories with cloud storage providers (Google Drive, OneDrive, S3,
-          Dropbox, NAS SFTP) via <code>rclone</code> with automatic network drop recovery.
+          Dropbox, NAS SFTP) via <code>rclone</code> with automatic network drop recovery and
+          Standard 19 <code>.hklock</code> sister-app deferral.
         </div>
       </div>
+
+      <CoexistenceWarningBanner jobId={jobId} moduleType="CloudSync" />
 
       <div className="hk-card">
         <div className="hk-card-header">
@@ -110,13 +119,13 @@ export const CloudSyncEditor: React.FC<Props> = ({ jobId, cfg, onChange }) => {
           <table className="hk-table stack-mobile">
             <thead>
               <tr>
-                <th style={{ width: 55 }}>On</th>
-                <th style={{ width: 150 }}>Label</th>
-                <th style={{ width: 115 }}>Mode</th>
-                <th>Local Folder</th>
-                <th>Remote Target (remote:path)</th>
-                <th>Extra Flags</th>
-                <th style={{ width: 70 }}>Del</th>
+                <th className="hk-has-hint" style={{ width: 55 }} title={CLOUD_SYNC_HINTS.thOn}>On</th>
+                <th className="hk-has-hint" style={{ width: 150 }} title={CLOUD_SYNC_HINTS.thLabel}>Label</th>
+                <th className="hk-has-hint" style={{ width: 115 }} title={CLOUD_SYNC_HINTS.thMode}>Mode</th>
+                <th className="hk-has-hint" title={CLOUD_SYNC_HINTS.thLocalFolder}>Local Folder</th>
+                <th className="hk-has-hint" title={CLOUD_SYNC_HINTS.thRemoteTarget}>Remote Target (remote:path)</th>
+                <th className="hk-has-hint" title={CLOUD_SYNC_HINTS.thFlags}>Extra Flags</th>
+                <th className="hk-has-hint" style={{ width: 70 }} title={CLOUD_SYNC_HINTS.thDelete}>Del</th>
               </tr>
             </thead>
             <tbody>
@@ -132,6 +141,8 @@ export const CloudSyncEditor: React.FC<Props> = ({ jobId, cfg, onChange }) => {
                   <td data-label="Enabled">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={CLOUD_SYNC_HINTS.pairEnabled}
                       checked={item.Enabled}
                       onChange={(e) =>
                         onChange((d) => {
@@ -207,11 +218,7 @@ export const CloudSyncEditor: React.FC<Props> = ({ jobId, cfg, onChange }) => {
                     <button
                       type="button"
                       className="hk-btn sm danger"
-                      onClick={() =>
-                        onChange((d) => {
-                          d.Jobs.splice(idx, 1);
-                        })
-                      }
+                      onClick={() => onChange((d) => d.Jobs.splice(idx, 1))}
                     >
                       ✕
                     </button>

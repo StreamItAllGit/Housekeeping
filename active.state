@@ -4,9 +4,9 @@
     "group":  "Personal",
     "relative_path":  "Personal/Housekeeping",
     "tier":  "Tier A (6-Folder)",
-    "version":  "0.1.11",
+    "version":  "0.1.12",
     "state_changed_at":  "2026-11-02",
-    "last_version_at":  "2026-11-07",
+    "last_version_at":  "2026-11-11",
     "production_subpath":  "Housekeeping",
     "superseded_by":  null,
     "notes":  "Active development and maintenance."

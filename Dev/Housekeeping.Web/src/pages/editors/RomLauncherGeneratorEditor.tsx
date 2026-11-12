@@ -1,15 +1,19 @@
+// @module: Housekeeping.Web/pages/editors/RomLauncherGeneratorEditor
+// @purpose: Module 4 (ROM, Emulator & PC Game Launcher Generator) editor with strict ProfileSelect runner dropdown, coexistence banner, and consolidated compliance card.
+// @depends-on: react, ../../components/ArchiveTemplateEditorDialog, ../../components/CoexistenceWarningBanner, ../../components/ComboSelect, ../../components/HybridPathPicker, ../../components/ModalDialog, ../../components/ProfileSelect, ../../constants/emulatorRunners, ../../context/AppStateContext, ../../hints/romLauncher, ../../services/apiClient, ../../types/models
+// @exports: RomLauncherGeneratorEditor
 import React, { useEffect, useState } from 'react';
 import { ArchiveTemplateEditorDialog } from '../../components/ArchiveTemplateEditorDialog';
+import { CoexistenceWarningBanner } from '../../components/CoexistenceWarningBanner';
 import { ComboSelect } from '../../components/ComboSelect';
 import { HybridPathPicker } from '../../components/HybridPathPicker';
 import { ModalDialog } from '../../components/ModalDialog';
+import { ProfileSelect } from '../../components/ProfileSelect';
+import { RUNNER_TYPES } from '../../constants/emulatorRunners';
 import { useAppState } from '../../context/AppStateContext';
+import { ROM_LAUNCHER_HINTS } from '../../hints/romLauncher';
 import { apiClient } from '../../services/apiClient';
-import type {
-  AuditStructureMode,
-  ConsoleCollectionRule,
-  RomLauncherGeneratorConfig,
-} from '../../types/models';
+import type { ConsoleCollectionRule, RomLauncherGeneratorConfig } from '../../types/models';
 
 interface Props {
   jobId: string;
@@ -17,24 +21,8 @@ interface Props {
   onChange: (mutator: (d: RomLauncherGeneratorConfig) => void) => void;
 }
 
-const EMULATOR_RUNNERS = [
-  'RetroArch',
-  'PCSX2',
-  'DuckStation',
-  'RPCS3',
-  'PPSSPP',
-  'Dolphin',
-  'Flycast',
-  'Redream',
-  'Project64',
-  'melonDS',
-  'Citra',
-  'Cemu',
-  'Xemu',
-  'Xenia',
-  'DirectExe',
-  'Custom',
-];
+const COMPLIANCE_TOGGLE_HINT =
+  'Runs zero-decompression archive structure compliance checks during Module 4 execution.\nFlagged clutter and descriptor issues appear in the Reports Center.';
 
 export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChange }) => {
   const {
@@ -61,7 +49,6 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
 
   const consoleNameOptions = consoleCatalog.map((c) => c.CanonicalName);
 
-  // Live Multi-Line Pre-Launch & Post-Launch Sync Command Preview
   useEffect(() => {
     let cancelled = false;
     const t = window.setTimeout(() => {
@@ -73,7 +60,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
             setPostPreview(res.postLaunchPreviewText || '(No active post-launch sync commands)');
           }
         })
-        .catch(() => {});
+        .catch((err) => console.debug('[RomLauncher] sync preview failed:', err));
     }, 300);
     return () => {
       cancelled = true;
@@ -196,9 +183,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
     onChange((d) => {
       const existingNames = new Set(d.Collections.map((c) => c.ConsoleName.toLowerCase()));
       for (const item of defaults) {
-        if (!existingNames.has(item.ConsoleName.toLowerCase())) {
-          d.Collections.push(item);
-        }
+        if (!existingNames.has(item.ConsoleName.toLowerCase())) d.Collections.push(item);
       }
     });
     showToast('Added starter Console Collection presets.');
@@ -209,93 +194,91 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
       ? cfg.Collections[overrideConsoleIdx]
       : null;
 
+  const launcherToggles: Array<{
+    label: string;
+    hint: string;
+    checked: boolean;
+    onToggle: (v: boolean) => void;
+  }> = [
+    {
+      label: 'Auto-Generate .m3u for Multi-Disc',
+      hint: ROM_LAUNCHER_HINTS.autoM3u,
+      checked: cfg.AutoGenerateM3uForMultiDisc,
+      onToggle: (v) => onChange((d) => (d.AutoGenerateM3uForMultiDisc = v)),
+    },
+    {
+      label: 'Auto-Compress Loose ROMs to .7z',
+      hint: ROM_LAUNCHER_HINTS.autoCompress7z,
+      checked: cfg.AutoCompressUnarchivedRomsWith7z,
+      onToggle: (v) => onChange((d) => (d.AutoCompressUnarchivedRomsWith7z = v)),
+    },
+    {
+      label: 'Delete Loose Originals After 7z',
+      hint: ROM_LAUNCHER_HINTS.deleteOriginals,
+      checked: cfg.DeleteUncompressedOriginalsAfter7z,
+      onToggle: (v) => onChange((d) => (d.DeleteUncompressedOriginalsAfter7z = v)),
+    },
+    {
+      label: 'Fast 7z Header List Inspection',
+      hint: ROM_LAUNCHER_HINTS.fast7zInspect,
+      checked: cfg.UseFast7zListInspection,
+      onToggle: (v) => onChange((d) => (d.UseFast7zListInspection = v)),
+    },
+    {
+      label: 'Extract .7z to SSD Scratch on Launch',
+      hint: ROM_LAUNCHER_HINTS.extractOnLaunch,
+      checked: cfg.ExtractArchiveOnLaunch,
+      onToggle: (v) => onChange((d) => (d.ExtractArchiveOnLaunch = v)),
+    },
+    {
+      label: 'Create Windows Start Menu Shortcuts',
+      hint: ROM_LAUNCHER_HINTS.startMenuShortcuts,
+      checked: cfg.CreateStartMenuShortcuts,
+      onToggle: (v) => onChange((d) => (d.CreateStartMenuShortcuts = v)),
+    },
+    {
+      label: 'Create Launcher Beside Archive',
+      hint: ROM_LAUNCHER_HINTS.localLauncherBeside,
+      checked: cfg.CreateLocalLauncherNextToArchive,
+      onToggle: (v) => onChange((d) => (d.CreateLocalLauncherNextToArchive = v)),
+    },
+    {
+      label: 'Force Overwrite Existing Launchers',
+      hint: ROM_LAUNCHER_HINTS.refreshLaunchers,
+      checked: cfg.RefreshExistingLaunchers,
+      onToggle: (v) => onChange((d) => (d.RefreshExistingLaunchers = v)),
+    },
+  ];
+
   return (
     <>
+      <CoexistenceWarningBanner jobId={jobId} moduleType="RomLauncherGenerator" />
+
       <div className="hk-info-banner">
         <strong>🎮 What This Module Does: ROM, Emulator &amp; PC Game Launcher Generator</strong>
         <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
           Builds multi-disc <code>.m3u</code> playlists, compresses loose ROMs to solid{' '}
-          <code>.7z</code>, generates one-click launchers, writes 9-column{' '}
-          <code>CRC32 + SHA-1</code> manifests verified against No-Intro &amp; Redump DATs, audits
-          archive compliance without decompression, syncs cloud saves/states across all rows, and
-          notifies Greenroom (<code>:8420</code>) when manifests change.
+          <code>.7z</code> (excluding sidecars/sentinels), generates one-click launchers with
+          multi-row cloud save/state sync, and coordinates cleanly with uStation (<code>:8460</code>)
+          and ShadowLibrary.
         </div>
       </div>
 
-      {/* 1. Launcher Generation & Output Paths */}
       <div className="hk-card">
         <h3 className="hk-card-title">🚀 Launcher Automation &amp; Output Directories</h3>
         <div className="hk-grid-4" style={{ marginTop: 10, marginBottom: 12 }}>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.AutoGenerateM3uForMultiDisc}
-              onChange={(e) => onChange((d) => (d.AutoGenerateM3uForMultiDisc = e.target.checked))}
-            />
-            Auto-Generate .m3u for Multi-Disc
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.AutoCompressUnarchivedRomsWith7z}
-              onChange={(e) =>
-                onChange((d) => (d.AutoCompressUnarchivedRomsWith7z = e.target.checked))
-              }
-            />
-            Auto-Compress Loose ROMs to .7z
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.DeleteUncompressedOriginalsAfter7z}
-              onChange={(e) =>
-                onChange((d) => (d.DeleteUncompressedOriginalsAfter7z = e.target.checked))
-              }
-            />
-            Delete Loose Originals After 7z
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.UseFast7zListInspection}
-              onChange={(e) => onChange((d) => (d.UseFast7zListInspection = e.target.checked))}
-            />
-            Fast 7z Header List Inspection
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.ExtractArchiveOnLaunch}
-              onChange={(e) => onChange((d) => (d.ExtractArchiveOnLaunch = e.target.checked))}
-            />
-            Extract .7z to SSD Scratch on Launch
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.CreateStartMenuShortcuts}
-              onChange={(e) => onChange((d) => (d.CreateStartMenuShortcuts = e.target.checked))}
-            />
-            Create Windows Start Menu Shortcuts
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.CreateLocalLauncherNextToArchive}
-              onChange={(e) =>
-                onChange((d) => (d.CreateLocalLauncherNextToArchive = e.target.checked))
-              }
-            />
-            Create Launcher Beside Archive
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.RefreshExistingLaunchers}
-              onChange={(e) => onChange((d) => (d.RefreshExistingLaunchers = e.target.checked))}
-            />
-            Force Overwrite Existing Launchers
-          </label>
+          {launcherToggles.map((item) => (
+            <label key={item.label} className="hk-checkbox-label hk-has-hint" title={item.hint}>
+              <input
+                type="checkbox"
+                className="hk-has-hint"
+                title={item.hint}
+                checked={item.checked}
+                onChange={(e) => item.onToggle(e.target.checked)}
+              />
+              {item.label}
+            </label>
+          ))}
         </div>
 
         <div className="hk-grid-3">
@@ -323,19 +306,31 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
         </div>
       </div>
 
-      {/* 2. 9-Column CRC32+SHA-1 Manifest, Fast Header CRC32, Compliance & Greenroom Sync */}
+      {/* Consolidated Archive Compliance & Module 8 / ShadowLibrary Pointer Card (T13 / Standard 17 §7) */}
       <div className="hk-card">
         <div className="hk-card-header">
           <div>
-            <h3 className="hk-card-title">
-              🛡 9-Column CRC32+SHA-1 Manifest, DAT Auditing, Compliance &amp; Greenroom Sync
-            </h3>
+            <h3 className="hk-card-title">🛡 Archive Structure Compliance &amp; Vault Manifests</h3>
             <p className="hk-card-subtitle">
-              Zero-decompression 7z/ZIP header CRC32 comparison, composite multi-file{' '}
-              <code>.hash</code> sidecars, and archive template compliance scanning.
+              Zero-decompression archive structure compliance runs here and in Reports Center.
+              Full 4-mode <code>.hash</code> sidecars, No-Intro/Redump DAT auditing, and{' '}
+              <code>.csv</code>/<code>.tsv</code> manifests are unified in{' '}
+              <strong>Module 8 (Collection Manifest)</strong> &amp; <strong>ShadowLibrary</strong>.
             </p>
           </div>
           <div className="hk-row">
+            <label className="hk-checkbox-label hk-has-hint" title={COMPLIANCE_TOGGLE_HINT}>
+              <input
+                type="checkbox"
+                className="hk-has-hint"
+                title={COMPLIANCE_TOGGLE_HINT}
+                checked={cfg.EnableArchiveTemplateComplianceScan}
+                onChange={(e) =>
+                  onChange((d) => (d.EnableArchiveTemplateComplianceScan = e.target.checked))
+                }
+              />
+              Scan Compliance on Run
+            </label>
             <button
               type="button"
               className="hk-btn sm"
@@ -343,6 +338,20 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
             >
               📐 Manage Archive Templates ({templates.length})
             </button>
+            {isComplianceScanRunning && (
+              <button
+                type="button"
+                className="hk-btn sm danger"
+                onClick={() =>
+                  void apiClient.stopCurrentJob().then((r) => {
+                    setPipelineState(r.state);
+                    showToast('Stopping compliance scan...');
+                  })
+                }
+              >
+                ⏹ Stop Scan
+              </button>
+            )}
             <button
               type="button"
               className="hk-btn sm primary"
@@ -362,138 +371,8 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
             </button>
           </div>
         </div>
-
-        <div className="hk-grid-4" style={{ marginBottom: 10 }}>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.EnableCollectionManifestCsv}
-              onChange={(e) => onChange((d) => (d.EnableCollectionManifestCsv = e.target.checked))}
-            />
-            Generate 9-Col collection_manifest.csv
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.UseFastArchiveHeaderCrc32Audit}
-              onChange={(e) =>
-                onChange((d) => (d.UseFastArchiveHeaderCrc32Audit = e.target.checked))
-              }
-            />
-            ⚡ Fast 7z/ZIP Header CRC32 Audit
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.DeepInspectAndHashInnerRoms}
-              onChange={(e) => onChange((d) => (d.DeepInspectAndHashInnerRoms = e.target.checked))}
-            />
-            Deep Inspect &amp; Hash Inner ROMs
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.TrustExistingHashFiles}
-              onChange={(e) => onChange((d) => (d.TrustExistingHashFiles = e.target.checked))}
-            />
-            Trust Validated .hash Sidecars
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.AutoDownloadMissingDats}
-              onChange={(e) => onChange((d) => (d.AutoDownloadMissingDats = e.target.checked))}
-            />
-            Auto-Download Missing No-Intro DATs
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.ForceRehashExistingManifestEntries}
-              onChange={(e) =>
-                onChange((d) => (d.ForceRehashExistingManifestEntries = e.target.checked))
-              }
-            />
-            Force Re-Hash Existing CSV Rows
-          </label>
-          <label className="hk-checkbox-label">
-            <input
-              type="checkbox"
-              checked={cfg.EnableArchiveTemplateComplianceScan}
-              onChange={(e) =>
-                onChange((d) => (d.EnableArchiveTemplateComplianceScan = e.target.checked))
-              }
-            />
-            Enable Archive Template Compliance Scan
-          </label>
-          <label className="hk-checkbox-label" style={{ color: 'var(--greenroom)' }}>
-            <input
-              type="checkbox"
-              checked={cfg.AutoSyncGreenroomOnManifestChange}
-              onChange={(e) =>
-                onChange((d) => (d.AutoSyncGreenroomOnManifestChange = e.target.checked))
-              }
-            />
-            🟢 Auto-Sync Greenroom (:8420) on Change
-          </label>
-        </div>
-
-        <div className="hk-grid-3" style={{ marginBottom: 10 }}>
-          <div className="hk-field">
-            <label className="hk-field-label">Manifest CSV Filename</label>
-            <input
-              type="text"
-              className="hk-input mono"
-              value={cfg.ManifestCsvFileName}
-              onChange={(e) => onChange((d) => (d.ManifestCsvFileName = e.target.value))}
-            />
-          </div>
-          <div className="hk-field">
-            <label className="hk-field-label">No-Intro / Redump DATs Folder</label>
-            <HybridPathPicker
-              value={cfg.DatFilesDirectory}
-              compactButton
-              onChange={(next) => onChange((d) => (d.DatFilesDirectory = next))}
-            />
-          </div>
-          <div className="hk-field">
-            <label className="hk-field-label">File vs Folder Hashing Logic</label>
-            <select
-              className="hk-select"
-              value={cfg.StructureMode}
-              onChange={(e) =>
-                onChange((d) => (d.StructureMode = e.target.value as AuditStructureMode))
-              }
-            >
-              <option value="Auto">⚡ Auto-Detect (ROM Files + PS3/WiiU Folders)</option>
-              <option value="FilesOnly">Files Only</option>
-              <option value="FolderDumpsOnly">Folder Dumps Only (Composite SHA-1)</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="hk-grid-2" style={{ marginBottom: 10 }}>
-          <div className="hk-row">
-            <label className="hk-checkbox-label">
-              <input
-                type="checkbox"
-                checked={cfg.EnableSecondaryManifestStorage}
-                onChange={(e) =>
-                  onChange((d) => (d.EnableSecondaryManifestStorage = e.target.checked))
-                }
-              />
-              Mirror Manifest CSV to Secondary Backup Folder:
-            </label>
-          </div>
-          <HybridPathPicker
-            value={cfg.SecondaryManifestDirectory}
-            onChange={(next) => onChange((d) => (d.SecondaryManifestDirectory = next))}
-            placeholder="Optional secondary backup directory (e.g. Google Drive / NAS)"
-          />
-        </div>
       </div>
 
-      {/* 3. Console & PC Game Collections Table */}
       <div className="hk-card">
         <div className="hk-card-header">
           <div>
@@ -504,11 +383,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
             </p>
           </div>
           <div className="hk-row">
-            <button
-              type="button"
-              className="hk-btn sm"
-              onClick={handleAddStandardTemplates}
-            >
+            <button type="button" className="hk-btn sm" onClick={handleAddStandardTemplates}>
               ⚡ Add Starter Console Presets
             </button>
             <button
@@ -541,17 +416,17 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
           <table className="hk-table stack-mobile">
             <thead>
               <tr>
-                <th>On</th>
-                <th>Console / System</th>
-                <th>Subfolder</th>
-                <th>Runner</th>
-                <th>Emulator / Exe Path</th>
-                <th>Core / Args</th>
-                <th>Extensions (CSV)</th>
-                <th>ROMs / Games Folder</th>
-                <th>Archive Template</th>
-                <th>Sync</th>
-                <th>Del</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thOn}>On</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thConsole}>Console / System</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thSubfolder}>Subfolder</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thRunner}>Runner</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thEmuPath}>Emulator / Exe Path</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thCoreArgs}>Core / Args</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thExts}>Extensions (CSV)</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thArchivesPath}>ROMs / Games Folder</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thTemplate}>Archive Template</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thSyncOverride}>Sync</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thDelete}>Del</th>
               </tr>
             </thead>
             <tbody>
@@ -568,23 +443,17 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                   <td data-label="Enabled">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={ROM_LAUNCHER_HINTS.collectionEnabled}
                       checked={col.Enabled}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.Collections[idx].Enabled = e.target.checked;
-                        })
-                      }
+                      onChange={(e) => onChange((d) => (d.Collections[idx].Enabled = e.target.checked))}
                     />
                   </td>
                   <td data-label="Console / System" style={{ minWidth: 175 }}>
                     <ComboSelect
                       value={col.ConsoleName}
                       options={consoleNameOptions}
-                      onChange={(v) =>
-                        onChange((d) => {
-                          d.Collections[idx].ConsoleName = v;
-                        })
-                      }
+                      onChange={(v) => onChange((d) => (d.Collections[idx].ConsoleName = v))}
                       placeholder="Sony - PlayStation 2"
                     />
                   </td>
@@ -593,22 +462,15 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       type="text"
                       className="hk-input mono"
                       value={col.SubFolder}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.Collections[idx].SubFolder = e.target.value;
-                        })
-                      }
+                      onChange={(e) => onChange((d) => (d.Collections[idx].SubFolder = e.target.value))}
                     />
                   </td>
-                  <td data-label="Emulator Runner" style={{ minWidth: 120 }}>
-                    <ComboSelect
+                  <td data-label="Emulator Runner" style={{ minWidth: 130 }}>
+                    <ProfileSelect
                       value={col.EmulatorRunnerType}
-                      options={EMULATOR_RUNNERS}
-                      onChange={(v) =>
-                        onChange((d) => {
-                          d.Collections[idx].EmulatorRunnerType = v;
-                        })
-                      }
+                      options={RUNNER_TYPES}
+                      onChange={(v) => onChange((d) => (d.Collections[idx].EmulatorRunnerType = v))}
+                      ariaLabel="Emulator runner preset"
                     />
                   </td>
                   <td data-label="Emulator / Exe Path" style={{ minWidth: 190 }}>
@@ -617,9 +479,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       mode="file"
                       compactButton
                       onChange={(next) =>
-                        onChange((d) => {
-                          d.Collections[idx].EmulatorExecutablePath = next;
-                        })
+                        onChange((d) => (d.Collections[idx].EmulatorExecutablePath = next))
                       }
                     />
                   </td>
@@ -629,9 +489,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       className="hk-input mono"
                       value={col.CoreOrCustomArgs}
                       onChange={(e) =>
-                        onChange((d) => {
-                          d.Collections[idx].CoreOrCustomArgs = e.target.value;
-                        })
+                        onChange((d) => (d.Collections[idx].CoreOrCustomArgs = e.target.value))
                       }
                       placeholder="core.dll or args"
                     />
@@ -642,9 +500,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       className="hk-input mono"
                       value={col.ExtensionsCsv}
                       onChange={(e) =>
-                        onChange((d) => {
-                          d.Collections[idx].ExtensionsCsv = e.target.value;
-                        })
+                        onChange((d) => (d.Collections[idx].ExtensionsCsv = e.target.value))
                       }
                     />
                   </td>
@@ -652,11 +508,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                     <HybridPathPicker
                       value={col.ArchivesPath}
                       compactButton
-                      onChange={(next) =>
-                        onChange((d) => {
-                          d.Collections[idx].ArchivesPath = next;
-                        })
-                      }
+                      onChange={(next) => onChange((d) => (d.Collections[idx].ArchivesPath = next))}
                     />
                   </td>
                   <td data-label="Archive Template" style={{ minWidth: 175 }}>
@@ -664,9 +516,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       className="hk-select"
                       value={col.ComplianceTemplateId || 'auto-community'}
                       onChange={(e) =>
-                        onChange((d) => {
-                          d.Collections[idx].ComplianceTemplateId = e.target.value;
-                        })
+                        onChange((d) => (d.Collections[idx].ComplianceTemplateId = e.target.value))
                       }
                     >
                       {templates.map((t) => (
@@ -690,11 +540,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                     <button
                       type="button"
                       className="hk-btn sm danger"
-                      onClick={() =>
-                        onChange((d) => {
-                          d.Collections.splice(idx, 1);
-                        })
-                      }
+                      onClick={() => onChange((d) => d.Collections.splice(idx, 1))}
                     >
                       ✕
                     </button>
@@ -706,7 +552,6 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
         </div>
       </div>
 
-      {/* 4. Multi-Row Pre/Post-Launch Cloud Save & State Sync (Fixes single-line preview bug!) */}
       <div className="hk-card hk-deferred-section">
         <div className="hk-card-header">
           <div>
@@ -719,9 +564,11 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
             </p>
           </div>
           <div className="hk-row">
-            <label className="hk-checkbox-label">
+            <label className="hk-checkbox-label hk-has-hint" title={ROM_LAUNCHER_HINTS.prePostSyncToggle}>
               <input
                 type="checkbox"
+                className="hk-has-hint"
+                title={ROM_LAUNCHER_HINTS.prePostSyncToggle}
                 checked={cfg.EnablePrePostLaunchSyncCommands}
                 onChange={(e) =>
                   onChange((d) => (d.EnablePrePostLaunchSyncCommands = e.target.checked))
@@ -753,12 +600,12 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
           <table className="hk-table stack-mobile">
             <thead>
               <tr>
-                <th style={{ width: 55 }}>On</th>
-                <th style={{ width: 140 }}>Label</th>
-                <th style={{ width: 130 }}>Sync Mode</th>
-                <th>Local Save / State Folder</th>
-                <th>Cloud Remote Target</th>
-                <th style={{ width: 65 }}>Del</th>
+                <th className="hk-has-hint" style={{ width: 55 }} title={ROM_LAUNCHER_HINTS.thOn}>On</th>
+                <th className="hk-has-hint" style={{ width: 140 }} title={ROM_LAUNCHER_HINTS.thSyncLabel}>Label</th>
+                <th className="hk-has-hint" style={{ width: 130 }} title={ROM_LAUNCHER_HINTS.thSyncMode}>Sync Mode</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thLocalSave}>Local Save / State Folder</th>
+                <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thRemoteSave}>Cloud Remote Target</th>
+                <th className="hk-has-hint" style={{ width: 65 }} title={ROM_LAUNCHER_HINTS.thDelete}>Del</th>
               </tr>
             </thead>
             <tbody>
@@ -775,12 +622,10 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                   <td data-label="Enabled">
                     <input
                       type="checkbox"
+                      className="hk-has-hint"
+                      title={ROM_LAUNCHER_HINTS.syncRowEnabled}
                       checked={row.Enabled}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.DefaultSyncPaths[idx].Enabled = e.target.checked;
-                        })
-                      }
+                      onChange={(e) => onChange((d) => (d.DefaultSyncPaths[idx].Enabled = e.target.checked))}
                     />
                   </td>
                   <td data-label="Label">
@@ -788,22 +633,14 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       type="text"
                       className="hk-input"
                       value={row.Label}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.DefaultSyncPaths[idx].Label = e.target.value;
-                        })
-                      }
+                      onChange={(e) => onChange((d) => (d.DefaultSyncPaths[idx].Label = e.target.value))}
                     />
                   </td>
                   <td data-label="Mode">
                     <select
                       className="hk-select"
                       value={row.SyncMode}
-                      onChange={(e) =>
-                        onChange((d) => {
-                          d.DefaultSyncPaths[idx].SyncMode = e.target.value;
-                        })
-                      }
+                      onChange={(e) => onChange((d) => (d.DefaultSyncPaths[idx].SyncMode = e.target.value))}
                     >
                       <option value="bisync">bisync (2-way)</option>
                       <option value="sync">sync (pull/push)</option>
@@ -814,11 +651,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                     <HybridPathPicker
                       value={row.LocalPath}
                       compactButton
-                      onChange={(next) =>
-                        onChange((d) => {
-                          d.DefaultSyncPaths[idx].LocalPath = next;
-                        })
-                      }
+                      onChange={(next) => onChange((d) => (d.DefaultSyncPaths[idx].LocalPath = next))}
                     />
                   </td>
                   <td data-label="Cloud Remote">
@@ -827,9 +660,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       className="hk-input mono"
                       value={row.RemoteTarget}
                       onChange={(e) =>
-                        onChange((d) => {
-                          d.DefaultSyncPaths[idx].RemoteTarget = e.target.value;
-                        })
+                        onChange((d) => (d.DefaultSyncPaths[idx].RemoteTarget = e.target.value))
                       }
                       placeholder="gdrive:RetroArch/saves"
                     />
@@ -838,11 +669,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                     <button
                       type="button"
                       className="hk-btn sm danger"
-                      onClick={() =>
-                        onChange((d) => {
-                          d.DefaultSyncPaths.splice(idx, 1);
-                        })
-                      }
+                      onClick={() => onChange((d) => d.DefaultSyncPaths.splice(idx, 1))}
                     >
                       ✕
                     </button>
@@ -854,9 +681,15 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
         </div>
 
         <div style={{ marginTop: 12 }}>
-          <label className="hk-checkbox-label" style={{ marginBottom: 8 }}>
+          <label
+            className="hk-checkbox-label hk-has-hint"
+            style={{ marginBottom: 8 }}
+            title={ROM_LAUNCHER_HINTS.customPrePostCli}
+          >
             <input
               type="checkbox"
+              className="hk-has-hint"
+              title={ROM_LAUNCHER_HINTS.customPrePostCli}
               checked={cfg.UseCustomPrePostLaunchCommands}
               onChange={(e) =>
                 onChange((d) => (d.UseCustomPrePostLaunchCommands = e.target.checked))
@@ -897,19 +730,13 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
         </div>
       </div>
 
-      {/* Archive Templates Modal */}
       <ArchiveTemplateEditorDialog
         open={templatesModalOpen}
         onClose={() => setTemplatesModalOpen(false)}
         templates={templates}
-        onSaveTemplates={(updated) =>
-          onChange((d) => {
-            d.ArchiveTemplates = updated;
-          })
-        }
+        onSaveTemplates={(updated) => onChange((d) => (d.ArchiveTemplates = updated))}
       />
 
-      {/* Per-Console Sync Paths Override Modal */}
       <ModalDialog
         open={overrideCol !== null}
         onClose={() => setOverrideConsoleIdx(null)}
@@ -929,9 +756,11 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
         {overrideCol && overrideConsoleIdx !== null && (
           <>
             <div className="hk-row" style={{ justifyContent: 'space-between', marginBottom: 12 }}>
-              <label className="hk-checkbox-label">
+              <label className="hk-checkbox-label hk-has-hint" title={ROM_LAUNCHER_HINTS.overrideConsoleSync}>
                 <input
                   type="checkbox"
+                  className="hk-has-hint"
+                  title={ROM_LAUNCHER_HINTS.overrideConsoleSync}
                   checked={overrideCol.OverrideJobSyncPaths}
                   onChange={(e) =>
                     onChange((d) => {
@@ -966,12 +795,12 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
               <table className="hk-table stack-mobile">
                 <thead>
                   <tr>
-                    <th>On</th>
-                    <th>Label</th>
-                    <th>Mode</th>
-                    <th>Local Folder</th>
-                    <th>Cloud Remote Target</th>
-                    <th>Del</th>
+                    <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thOn}>On</th>
+                    <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thSyncLabel}>Label</th>
+                    <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thSyncMode}>Mode</th>
+                    <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thLocalSave}>Local Folder</th>
+                    <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thRemoteSave}>Cloud Remote Target</th>
+                    <th className="hk-has-hint" title={ROM_LAUNCHER_HINTS.thDelete}>Del</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -987,6 +816,8 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                       <td data-label="Enabled">
                         <input
                           type="checkbox"
+                          className="hk-has-hint"
+                          title={ROM_LAUNCHER_HINTS.syncRowEnabled}
                           checked={sp.Enabled}
                           onChange={(e) =>
                             onChange((d) => {
@@ -1031,8 +862,7 @@ export const RomLauncherGeneratorEditor: React.FC<Props> = ({ jobId, cfg, onChan
                           compactButton
                           onChange={(next) =>
                             onChange((d) => {
-                              d.Collections[overrideConsoleIdx].CustomSyncPaths[sIdx].LocalPath =
-                                next;
+                              d.Collections[overrideConsoleIdx].CustomSyncPaths[sIdx].LocalPath = next;
                             })
                           }
                         />
