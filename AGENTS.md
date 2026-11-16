@@ -1,8 +1,8 @@
 # Project Context: Housekeeping (`D:\Projects\Personal\Housekeeping\`)
 
-- **Role:** Automated Storage Hygiene & Deduplication Suite (Tier A, `v0.1.12`, SemVer PATCH+1).
-- **Workspace & Sandbox:** [`Dev\`](file:///D:/Projects/Personal/Housekeeping/Dev/) (Code/Tests) | [`Sandbox\`](file:///D:/Projects/Personal/Housekeeping/Sandbox/) (`--test-mode` only)
-- **Prod & SDK (Read-Only):** [`D:\Programs\Housekeeping\`](file:///D:/Programs/Housekeeping/) | [`Foundation\`](file:///D:/Projects/Personal/Foundation/) (`Dev\lib\` sync)
+- **Role:** Automated Storage Hygiene & Deduplication Suite (Tier A, `v0.1.12-hf.1`, SemVer PATCH+1).
+- **Workspace:** [`Dev\`](file:///D:/Projects/Personal/Housekeeping/Dev/) (Code, Release & Isolated Tests via `APP_ISOLATED_TEST=1`)
+- **Prod (Read-Only):** [`D:\Programs\Housekeeping\`](file:///D:/Programs/Housekeeping/)
 
 ## 1. Root Quartet & State
 - [`README.md`](file:///D:/Projects/Personal/Housekeeping/README.md) | [`FEATURES.md`](file:///D:/Projects/Personal/Housekeeping/FEATURES.md) | [`ROADMAP.md`](file:///D:/Projects/Personal/Housekeeping/ROADMAP.md) | [`CHANGELOG.md`](file:///D:/Projects/Personal/Housekeeping/CHANGELOG.md) | [`active.state`](file:///D:/Projects/Personal/Housekeeping/active.state)

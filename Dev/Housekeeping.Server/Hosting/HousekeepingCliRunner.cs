@@ -1,5 +1,5 @@
 // @module: Housekeeping.Server.Hosting.HousekeepingCliRunner
-// @purpose: Synchronous one-shot --status and --repair-config CLI handlers for batch wrappers and headless diagnostics.
+// @purpose: Synchronous one-shot --status and --repair-config CLI handlers for batch wrappers and diagnostics.
 // @depends-on: System, System.Diagnostics, System.IO, System.Net.Http, System.Text.Json, Housekeeping.Services
 // @exports: Housekeeping.Server.Hosting.HousekeepingCliRunner
 
@@ -22,7 +22,7 @@ namespace Housekeeping.Server.Hosting
                     customBaseDir: cli.CustomDataDirectory,
                     customConfigFilePath: cli.CustomConfigFilePath,
                     customLogsDir: cli.CustomLogsDirectory,
-                    isTestMode: cli.TestMode);
+                    isolatedOverride: cli.IsIsolatedInvocation);
 
                 int port = cli.PortOverride ?? cfgSvc.Config.WebServer.Port;
                 bool httpOnline = false;
@@ -62,8 +62,7 @@ namespace Housekeeping.Server.Hosting
                     daemonOnline = httpOnline,
                     isRunning,
                     port,
-                    isTestMode = cfgSvc.IsTestMode,
-                    isSandboxed = cfgSvc.IsSandboxed,
+                    isIsolated = cfgSvc.IsIsolatedOverride,
                     configPath = cfgSvc.ActiveConfigFilePath,
                     dataDirectory = cfgSvc.DataDirectory,
                     logsDirectory = cfgSvc.ActiveLogsDir,
@@ -90,9 +89,11 @@ namespace Housekeeping.Server.Hosting
         {
             try
             {
-                if (cli.TestMode && string.IsNullOrWhiteSpace(cli.CustomDataDirectory) && string.IsNullOrWhiteSpace(cli.CustomConfigFilePath))
+                if (string.IsNullOrWhiteSpace(cli.CustomDataDirectory) &&
+                    string.IsNullOrWhiteSpace(cli.CustomConfigFilePath) &&
+                    string.Equals(Environment.GetEnvironmentVariable("APP_ISOLATED_TEST"), "1", StringComparison.OrdinalIgnoreCase))
                 {
-                    Console.Error.WriteLine("ERROR: Fail-closed sandbox violation: --test-mode requires --data-dir or --config.");
+                    Console.Error.WriteLine("ERROR: Fail-closed isolation violation: APP_ISOLATED_TEST requires --data-dir or --config.");
                     Console.Error.Flush();
                     return 2;
                 }
@@ -101,7 +102,7 @@ namespace Housekeeping.Server.Hosting
                     customBaseDir: cli.CustomDataDirectory,
                     customConfigFilePath: cli.CustomConfigFilePath,
                     customLogsDir: cli.CustomLogsDirectory,
-                    isTestMode: cli.TestMode);
+                    isolatedOverride: cli.IsIsolatedInvocation);
 
                 bool ok = cfgSvc.RepairAndValidateConfig(out string summary);
                 var payload = new

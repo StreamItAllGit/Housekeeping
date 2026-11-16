@@ -1,4 +1,4 @@
-const CACHE_NAME = 'housekeeping-shell-v0.1.12';
+const CACHE_NAME = 'housekeeping-shell-v0.1.12-hf.1';
 const PRECACHE_URLS = [
   '/',
   '/manifest.webmanifest',

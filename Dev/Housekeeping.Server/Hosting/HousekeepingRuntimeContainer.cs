@@ -23,7 +23,7 @@ namespace Housekeeping.Server.Hosting
     }
 
     /// <summary>
-    /// Owns the full Housekeeping 3.0 backend runtime graph for either standalone headless execution,
+    /// Owns the full Housekeeping 3.0 backend runtime graph for either standalone server execution,
     /// in-process System Tray + WebView2 daemon hosting, or isolated integration test hosts.
     /// </summary>
     public sealed class HousekeepingRuntimeContainer : IDisposable
@@ -50,19 +50,19 @@ namespace Housekeeping.Server.Hosting
             bool startBackgroundTimers = true,
             string? customConfigFilePath = null,
             string? customLogsDirectory = null,
-            bool isTestMode = false,
+            bool isolatedOverride = false,
             bool forceDryRun = false)
         {
             ConfigService = new ConfigService(
                 customBaseDir: customDataDirectory,
                 customConfigFilePath: customConfigFilePath,
                 customLogsDir: customLogsDirectory,
-                isTestMode: isTestMode);
+                isolatedOverride: isolatedOverride);
             LogBuffer = new TerminalLogBufferService(ConfigService.ActiveLogsDir);
             CrashBundleService.RegisterGlobalHandlers(
                 () => ConfigService.ActiveLogsDir,
                 RemoteNodeDeploymentService.GetLocalAppVersion(),
-                isTestMode,
+                ConfigService.IsIsolatedOverride,
                 archetype: "2-tray-companion",
                 getLogBuffer: () => LogBuffer);
             InteractiveCli = new InteractiveCliSessionService(LogBuffer, ConfigService.DataDirectory);

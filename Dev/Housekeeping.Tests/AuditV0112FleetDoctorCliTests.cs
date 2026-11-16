@@ -68,14 +68,14 @@ namespace Housekeeping.Tests
             Directory.CreateDirectory(legacyRoot);
             try
             {
-                File.WriteAllText(Path.Combine(cleanRoot, "app", "version.txt"), "0.1.12");
+                File.WriteAllText(Path.Combine(cleanRoot, "app", "version.txt"), "0.1.12-hf.1");
                 File.WriteAllText(Path.Combine(cleanRoot, "data", "settings.json"), "{\"ConfigVersion\":4}");
 
                 Assert.False(RemoteNodeDeploymentService.IsLegacyFlatRemoteRoot(cleanRoot));
                 Assert.Equal(Path.Combine(cleanRoot, "app"), RemoteNodeDeploymentService.ResolveRemoteBinaryDir(cleanRoot));
                 Assert.Equal(Path.Combine(cleanRoot, "data", "settings.json"), RemoteNodeDeploymentService.ResolveRemoteSettingsReadPath(cleanRoot));
                 Assert.Equal(Path.Combine(cleanRoot, "data", "settings.json"), RemoteNodeDeploymentService.ResolveRemoteSettingsWritePath(cleanRoot));
-                Assert.Equal("0.1.12", RemoteNodeDeploymentService.DetectRemoteAppVersionFromDisk(cleanRoot));
+                Assert.Equal("0.1.12-hf.1", RemoteNodeDeploymentService.DetectRemoteAppVersionFromDisk(cleanRoot));
 
                 // Legacy flat node fallback
                 File.WriteAllText(Path.Combine(legacyRoot, "settings.json"), "{\"ConfigVersion\":4}");
@@ -102,9 +102,9 @@ namespace Housekeeping.Tests
         [Fact]
         public async Task Bug05_SystemDoctorExportAndBackup_RespectActiveLogsDir_AndSiblingBackupsWithoutLockFailure()
         {
-            string sandboxRoot = Path.Combine(Path.GetTempPath(), $"hk_bug05_{Guid.NewGuid():N}");
-            string dataDir = Path.Combine(sandboxRoot, "data");
-            string logsDir = Path.Combine(sandboxRoot, "logs");
+            string isolatedRoot = Path.Combine(Path.GetTempPath(), $"hk_bug05_{Guid.NewGuid():N}");
+            string dataDir = Path.Combine(isolatedRoot, "data");
+            string logsDir = Path.Combine(isolatedRoot, "logs");
             Directory.CreateDirectory(dataDir);
             Directory.CreateDirectory(logsDir);
 
@@ -117,7 +117,7 @@ namespace Housekeeping.Tests
                     BindLanOverride = false,
                     CustomDataDirectory = dataDir,
                     CustomLogsDirectory = logsDir,
-                    TestMode = true,
+                    IsolatedOverride = true,
                     StartBackgroundTimers = false
                 });
 
@@ -140,7 +140,7 @@ namespace Housekeeping.Tests
                 Assert.Equal(HttpStatusCode.OK, backupResp.StatusCode);
                 using var backupDoc = JsonDocument.Parse(await backupResp.Content.ReadAsStringAsync());
                 string backupPath = backupDoc.RootElement.GetProperty("backupPath").GetString()!;
-                string expectedBackupsDir = Path.Combine(sandboxRoot, "backups");
+                string expectedBackupsDir = Path.Combine(isolatedRoot, "backups");
                 Assert.StartsWith(expectedBackupsDir, backupPath, StringComparison.OrdinalIgnoreCase);
                 Assert.True(File.Exists(backupPath));
             }
@@ -149,7 +149,7 @@ namespace Housekeeping.Tests
                 await TestCleanupHelper.TryAwaitAsync(() => app.StopAsync());
                 await TestCleanupHelper.TryAwaitAsync(async () => await app.DisposeAsync());
                 TestCleanupHelper.TryDispose(rt);
-                TestCleanupHelper.TryDeleteDirectory(sandboxRoot);
+                TestCleanupHelper.TryDeleteDirectory(isolatedRoot);
             }
         }
 
@@ -171,21 +171,30 @@ namespace Housekeeping.Tests
                 File.WriteAllText(Path.Combine(dataDir, "settings.json.bak"), JsonSerializer.Serialize(validCfg, ConfigService.JsonOptions));
                 File.WriteAllText(Path.Combine(dataDir, "settings.json"), "{ CORRUPT JSON !!!");
 
-                var parsedRepair = HousekeepingCliParser.Parse(new[] { "--repair-config", "--test-mode", "--data-dir", dataDir, "--log-dir", logsDir });
+                var parsedRepair = HousekeepingCliParser.Parse(new[] { "--repair-config", "--data-dir", dataDir, "--log-dir", logsDir });
                 Assert.True(parsedRepair.RunRepairConfig);
                 Assert.Equal(0, HousekeepingCliRunner.RunRepairConfig(parsedRepair));
                 Assert.NotEmpty(Directory.GetFiles(Path.Combine(dataDir, "quarantine"), "settings.corrupt_*.json"));
 
-                var reloaded = new ConfigService(customBaseDir: dataDir, customLogsDir: logsDir, isTestMode: true);
+                var reloaded = new ConfigService(customBaseDir: dataDir, customLogsDir: logsDir, isolatedOverride: true);
                 Assert.Equal("Sleep", reloaded.Config.PostRunPowerAction);
 
-                var parsedStatus = HousekeepingCliParser.Parse(new[] { "--status", "--test-mode", "--data-dir", dataDir, "--log-dir", logsDir });
+                var parsedStatus = HousekeepingCliParser.Parse(new[] { "--status", "--data-dir", dataDir, "--log-dir", logsDir });
                 Assert.True(parsedStatus.RunStatus);
                 Assert.Equal(0, HousekeepingCliRunner.RunStatusCheck(parsedStatus));
 
-                // Fail-closed sandbox check (--test-mode without --data-dir/--config returns exit code 2)
-                var unsafeCli = HousekeepingCliParser.Parse(new[] { "--repair-config", "--test-mode" });
-                Assert.Equal(2, HousekeepingCliRunner.RunRepairConfig(unsafeCli));
+                // Fail-closed isolation check (APP_ISOLATED_TEST=1 without --data-dir/--config returns exit code 2)
+                string? prevIso = Environment.GetEnvironmentVariable("APP_ISOLATED_TEST");
+                try
+                {
+                    Environment.SetEnvironmentVariable("APP_ISOLATED_TEST", "1");
+                    var unsafeCli = HousekeepingCliParser.Parse(new[] { "--repair-config" });
+                    Assert.Equal(2, HousekeepingCliRunner.RunRepairConfig(unsafeCli));
+                }
+                finally
+                {
+                    Environment.SetEnvironmentVariable("APP_ISOLATED_TEST", prevIso);
+                }
 
                 // Delimiter-aware TSV (.tsv) and Semicolon CSV (.csv) exports
                 var sampleRecords = new List<ManifestRecordItem>

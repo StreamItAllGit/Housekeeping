@@ -1,5 +1,5 @@
 // @module: Housekeeping.Server.Endpoints.HousekeepingApiEndpoints.CoexistenceAndControl
-// @purpose: Three-tier pipeline execution/stop endpoints (stop-job vs stop-queue) and Sister-App Coexistence status/preset endpoints.
+// @purpose: Dual-mode pipeline execution/stop endpoints (stop-job vs stop-queue) and Sister-App Coexistence status/preset endpoints.
 // @depends-on: System, System.Threading, System.Threading.Tasks, Housekeeping.Models, Housekeeping.Server.Hosting, Housekeeping.Services, Microsoft.AspNetCore.Builder, Microsoft.AspNetCore.Http
 // @exports: Housekeeping.Server.Endpoints.HousekeepingApiEndpoints (partial: MapCoexistenceAndControlEndpoints)
 
@@ -19,7 +19,7 @@ namespace Housekeeping.Server.Endpoints
     {
         private static void MapCoexistenceAndControlEndpoints(this WebApplication app, RouteGroupBuilder api)
         {
-            // ==================== PIPELINE ORCHESTRATION & 3-TIER STOP CONTROL ==================== //
+            // ==================== PIPELINE ORCHESTRATION & DUAL-MODE STOP CONTROL ==================== //
             api.MapGet("/pipeline/state", (HousekeepingRuntimeContainer rt) =>
                 Results.Ok(rt.Orchestrator.GetStateSnapshot()));
 

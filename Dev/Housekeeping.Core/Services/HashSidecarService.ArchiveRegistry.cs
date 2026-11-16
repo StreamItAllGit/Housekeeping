@@ -66,7 +66,7 @@ namespace Housekeeping.Services
             doc.SchemaVersion = 1;
             doc.UpdatedAtUtc = DateTime.UtcNow.ToString("O");
             doc.UpdatedByApp = "housekeeping";
-            doc.UpdatedByVersion = "0.1.12";
+            doc.UpdatedByVersion = "0.1.12-hf.1";
 
             string regPath = Path.Combine(directoryPath, ArchiveHashesRegistryFileName);
             string json = JsonSerializer.Serialize(doc, RegistryJsonOptions);

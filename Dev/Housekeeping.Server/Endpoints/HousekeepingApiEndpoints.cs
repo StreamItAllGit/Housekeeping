@@ -111,8 +111,7 @@ namespace Housekeeping.Server.Endpoints
                 version = RemoteNodeDeploymentService.GetLocalAppVersion(),
                 machineName = Environment.MachineName,
                 isRunning = rt.Orchestrator.IsRunning,
-                isTestMode = rt.ConfigService.IsTestMode,
-                isSandboxed = rt.ConfigService.IsSandboxed,
+                isIsolated = rt.ConfigService.IsIsolatedOverride,
                 forceDryRun = rt.Orchestrator.ForceDryRun,
                 timestampUtc = DateTime.UtcNow
             }));
@@ -1195,7 +1194,7 @@ namespace Housekeeping.Server.Endpoints
 
             api.MapGet("/settings/watchdog", (HousekeepingRuntimeContainer rt) =>
             {
-                if (rt.ConfigService.IsTestMode)
+                if (rt.ConfigService.IsIsolatedOverride)
                 {
                     return Results.Ok(new { isRegistered = rt.ConfigService.Config.EnableWatchdog, taskName = WindowsWatchdogService.TaskName, simulated = true });
                 }
@@ -1205,7 +1204,7 @@ namespace Housekeeping.Server.Endpoints
 
             api.MapPost("/settings/watchdog", ([FromBody] WatchdogPayload body, HousekeepingRuntimeContainer rt) =>
             {
-                if (rt.ConfigService.IsTestMode)
+                if (rt.ConfigService.IsIsolatedOverride)
                 {
                     rt.ConfigService.MutateAndSave(cfg =>
                     {
@@ -1217,7 +1216,7 @@ namespace Housekeeping.Server.Endpoints
                         ok = true,
                         isRegistered = body.Enable,
                         simulated = true,
-                        message = "[TestMode] Simulated watchdog update in sandboxed settings without mutating Windows Task Scheduler."
+                        message = "[Isolated] Simulated watchdog update in isolated settings without mutating Windows Task Scheduler."
                     });
                 }
 
@@ -1271,12 +1270,12 @@ namespace Housekeeping.Server.Endpoints
             api.MapPost("/system/tailscale-pwa/enable", async (HousekeepingRuntimeContainer rt, TailscalePwaService tsPwa, CancellationToken ct) =>
             {
                 int port = rt.ConfigService.Config.WebServer.Port;
-                if (rt.ConfigService.IsTestMode)
+                if (rt.ConfigService.IsIsolatedOverride)
                 {
                     return Results.Ok(new TailscalePwaStatusDto
                     {
                         Simulated = true,
-                        StatusMessage = "[TestMode] Tailscale Serve host mutation is suppressed in --test-mode."
+                        StatusMessage = "[Isolated] Tailscale Serve host mutation is suppressed in isolated mode."
                     });
                 }
                 var status = await tsPwa.EnableHttpsServeAsync(port, ct);
@@ -1294,12 +1293,12 @@ namespace Housekeeping.Server.Endpoints
             api.MapPost("/system/tailscale-pwa/disable", async (HousekeepingRuntimeContainer rt, TailscalePwaService tsPwa, CancellationToken ct) =>
             {
                 int port = rt.ConfigService.Config.WebServer.Port;
-                if (rt.ConfigService.IsTestMode)
+                if (rt.ConfigService.IsIsolatedOverride)
                 {
                     return Results.Ok(new TailscalePwaStatusDto
                     {
                         Simulated = true,
-                        StatusMessage = "[TestMode] Tailscale Serve host mutation is suppressed in --test-mode."
+                        StatusMessage = "[Isolated] Tailscale Serve host mutation is suppressed in isolated mode."
                     });
                 }
                 var status = await tsPwa.DisableHttpsServeAsync(port, ct);

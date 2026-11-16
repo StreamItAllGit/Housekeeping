@@ -65,7 +65,7 @@ namespace Housekeeping.DesktopHost
 
             if (!createdNew)
             {
-                if (!cli.StartMinimized && !cli.IsWatchdog && !cli.Headless && !cli.TestMode)
+                if (!cli.StartMinimized && !cli.IsWatchdog)
                 {
                     StaNativeDialogBridge.BroadcastRestoreMessage();
                 }
@@ -88,28 +88,11 @@ namespace Housekeeping.DesktopHost
             CrashBundleService.RegisterGlobalHandlers(
                 () => initialLogsDir,
                 RemoteNodeDeploymentService.GetLocalAppVersion(),
-                cli.TestMode,
+                cli.IsIsolatedInvocation,
                 archetype: "2-tray-companion");
 
             try
             {
-                if (cli.Headless)
-                {
-                    var app = HousekeepingServerHost.BuildWebApplication(cli.RemainingArgs, new HousekeepingServerOptions
-                    {
-                        PortOverride = cli.PortOverride,
-                        BindLanOverride = cli.BindLanOverride,
-                        CustomDataDirectory = cli.CustomDataDirectory,
-                        CustomConfigFilePath = cli.CustomConfigFilePath,
-                        CustomLogsDirectory = cli.CustomLogsDirectory,
-                        TestMode = cli.TestMode,
-                        DryRun = cli.DryRun,
-                        StartBackgroundTimers = true
-                    });
-                    app.Run();
-                    return 0;
-                }
-
                 Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
                 Application.ThreadException += (_, e) =>
                 {
@@ -131,13 +114,13 @@ namespace Housekeeping.DesktopHost
                 using var trayContext = new TrayDaemonApplicationContext(new TrayDaemonLaunchOptions
                 {
                     RawArgs = cli.RemainingArgs,
-                    StartMinimized = cli.StartMinimized || cli.TestMode,
+                    StartMinimized = cli.StartMinimized,
                     PortOverride = cli.PortOverride,
                     BindLanOverride = cli.BindLanOverride,
                     CustomDataDirectory = cli.CustomDataDirectory,
                     CustomConfigFilePath = cli.CustomConfigFilePath,
                     CustomLogsDirectory = cli.CustomLogsDirectory,
-                    TestMode = cli.TestMode,
+                    IsolatedOverride = cli.IsIsolatedInvocation,
                     DryRun = cli.DryRun,
                     ManagedByMother = cli.ManagedByMother
                 });
@@ -165,7 +148,7 @@ namespace Housekeeping.DesktopHost
                     Debug.WriteLine($"[Program] Crash log write failed: {logEx.Message}");
                 }
 
-                if (!cli.Headless && !cli.IsWatchdog && !cli.StartMinimized && !cli.TestMode)
+                if (!cli.IsWatchdog && !cli.StartMinimized)
                 {
                     MessageBox.Show(
                         $"Housekeeping failed to start:\n\n{ex.Message}",
@@ -210,7 +193,7 @@ namespace Housekeeping.DesktopHost
 
         private static string ResolveMutexName(HousekeepingParsedCli cli)
         {
-            if (!cli.IsSandboxedInvocation)
+            if (!cli.IsIsolatedInvocation)
             {
                 return CanonicalSingleInstanceMutexName;
             }
@@ -223,7 +206,7 @@ namespace Housekeeping.DesktopHost
             string logRef = !string.IsNullOrWhiteSpace(cli.CustomLogsDirectory)
                 ? Path.GetFullPath(cli.CustomLogsDirectory)
                 : "";
-            string scopeKey = $"{baseRef.ToLowerInvariant()}|{logRef.ToLowerInvariant()}|{cli.PortOverride?.ToString() ?? "default"}|{cli.Headless}|{cli.TestMode}|{cli.DryRun}";
+            string scopeKey = $"{baseRef.ToLowerInvariant()}|{logRef.ToLowerInvariant()}|{cli.PortOverride?.ToString() ?? "default"}|{cli.DryRun}";
             byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(scopeKey));
             string hex12 = Convert.ToHexString(hash).Substring(0, 12);
             return $@"Global\Housekeeping_3_Scoped_{hex12}";

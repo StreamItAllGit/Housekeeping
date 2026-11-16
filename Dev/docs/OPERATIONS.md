@@ -1,16 +1,16 @@
 # Housekeeping — Operations, Deployment & Troubleshooting Runbook
 
 - **Document:** `OPERATIONS.md` (Technical Manual 3 of 4)
-- **Active Build Version:** `v0.1.12` (In-Dev Target: `v0.1.13`)
+- **Active Build Version:** `v0.1.12-hf.1` (In-Dev Target: `v0.1.13`)
 - **Canonical Production Root:** `D:\Programs\Housekeeping\`
-- **Development & Sandbox Roots:** `D:\Projects\Personal\Housekeeping\Dev\` & `D:\Projects\Personal\Housekeeping\Sandbox\`
-- **Default Ports:** HTTP / SignalR `:5178` (`:15178` in Sandbox) · Tailscale Serve HTTPS Proxy `:443` / `:8478` $\rightarrow$ `http://127.0.0.1:5178`
+- **Development Root:** `D:\Projects\Personal\Housekeeping\Dev\`
+- **Default Ports:** HTTP / SignalR `:5178` · Tailscale Serve HTTPS Proxy `:443` / `:8478` $\rightarrow$ `http://127.0.0.1:5178`
 
 ---
 
 ## 1. Install Topology & Canonical Directories
 
-Per Dev Bible [Standard 01](file:///D:/Projects/Personal/_DevBible/01_PROJECT_LAYOUTS.md) and [Standard 12 §3.1](file:///D:/Projects/Personal/_DevBible/12_WORKSPACE_AND_DEPLOYMENT_CLEANLINESS.md), Housekeeping separates its outer 6-folder workspace (`D:\Projects\Personal\Housekeeping\`) from its clean deployed runtime layout (`D:\Programs\Housekeeping\` or `Builds\v0.1.12\`):
+Per Dev Bible [Standard 01](file:///D:/Projects/Personal/_DevBible/01_PROJECT_LAYOUTS.md) and [Standard 12 §3.1](file:///D:/Projects/Personal/_DevBible/12_WORKSPACE_AND_DEPLOYMENT_CLEANLINESS.md), Housekeeping separates its outer 5-folder workspace (`D:\Projects\Personal\Housekeeping\`) from its clean deployed runtime layout (`D:\Programs\Housekeeping\` or `Builds\v0.1.12-hf.1\`):
 
 ```text
 D:\Programs\Housekeeping\                     # Canonical Production Root (<InstallRoot>)
@@ -19,13 +19,13 @@ D:\Programs\Housekeeping\                     # Canonical Production Root (<Inst
 ├── mother.manifest.json                      # Mother v1.0 Fleet supervision manifest (SchemaVersion 2)
 ├── app\                                      # Compiled application binaries, wwwroot SPA & installer receipts
 │   ├── Housekeeping.exe                      # Primary WinForms Tray + WebView2 Host (Housekeeping.DesktopHost)
-│   ├── Housekeeping.Server.exe               # Headless Kestrel server executable
+│   ├── Housekeeping.Server.exe               # Standalone Kestrel server executable
 │   ├── Housekeeping-Uninstall.exe            # Contained uninstaller binary
 │   ├── Housekeeping.Core.dll                 # Core domain, services & 8 pipeline modules
 │   ├── Housekeeping.Server.dll               # ASP.NET Core Minimal APIs & SignalR hub
 │   ├── suite.manifest.json                   # Standard 19 §3 companion suite manifest (v2)
 │   ├── .install_manifest.json                # Installed file inventory receipt
-│   ├── version.txt                           # Active deployed SemVer stamp (0.1.12)
+│   ├── version.txt                           # Active deployed SemVer stamp (0.1.12-hf.1)
 │   ├── wwwroot\                              # Compiled React 19 + Vite 6 SPA assets
 │   └── tools\                                # Optional bundled portable CLI tools
 ├── data\                                     # Canonical runtime state (<DataDir>, resolved by ConfigService)
@@ -68,15 +68,15 @@ Parsed by [`HousekeepingCliParser.Parse`](file:///D:/Projects/Personal/Housekeep
 
 | CLI Flag | Env Var Equivalent | Default | Behavior |
 | :--- | :--- | :--- | :--- |
-| `--data-dir <path>` (or `--data-dir=<path>`) | `HOUSEKEEPING_DATA_DIR`, `DATA_DIR`, `APP_HOME` | `<InstallRoot>\data` | Overrides `<DataDir>` for `settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, and `manifests\`. Marks invocation as sandboxed. |
+| `--data-dir <path>` (or `--data-dir=<path>`) | `HOUSEKEEPING_DATA_DIR`, `DATA_DIR`, `APP_HOME` | `<InstallRoot>\data` | Overrides `<DataDir>` for `settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, and `manifests\`. Marks invocation as isolated. |
 | `--config <filePath>` (or `--config=<filePath>`) | `HOUSEKEEPING_CONFIG_FILE`, `CONFIG_PATH` | `<DataDir>\settings.json` | Overrides the active JSON configuration file path. |
 | `--log-dir <path>` (or `--log-dir=<path>`) | `HOUSEKEEPING_LOG_DIR`, `LOG_DIR` | `<InstallRoot>\logs` (or `<DataDir>\logs` when custom `--data-dir` is passed) | Overrides `<LogsDir>` (`ActiveLogsDir`) for `Housekeeping_Live.log`, `runs\`, `crashes\`, System Doctor exports, and `telemetry_heartbeat.json`. |
-| `--port <1..65535>` (or `--port=<n>`) | `HOUSEKEEPING_PORT`, `PORT` | `5178` (`15178` in Sandbox) | Overrides `WebServer.Port` for Kestrel HTTP & SignalR binding. |
+| `--port <1..65535>` (or `--port=<n>`) | `HOUSEKEEPING_PORT`, `PORT` | `5178` | Overrides `WebServer.Port` for Kestrel HTTP & SignalR binding. |
 | `--localhost-only` | — | `false` | Forces loopback-only `127.0.0.1` Kestrel binding (disables LAN/Tailnet listener). |
-| `--headless` | `HOUSEKEEPING_HEADLESS=1` | `false` (Tray Host) / `true` (`Server.exe`) | Runs Kestrel web/API server and background scheduler without WinForms system tray UI or WebView2 window. |
+| `--tray-only` | — | `false` (`TrayDaemonApplicationContext`) | Starts background daemon in System Tray without popping open the desktop window (`UiPresentationMode.TrayOrBackground`). |
 | `--status` | — | `false` | **One-shot CLI probe:** Outputs structured JSON (`version`, `dataDir`, `configPath`, `logsDir`, `configValid`, `daemonReachable`, `port`) and exits synchronously (`0`). |
 | `--repair-config` | — | `false` | **One-shot CLI healer:** Validates `settings.json`; if corrupt, quarantines it to `settings.json.corrupt_<timestamp>.bak`, restores from `.bak`/snapshot/defaults, prints JSON summary, and exits (`0`). |
-| `--test-mode` | `HOUSEKEEPING_TEST_MODE=1`, `TEST_MODE=1` | `false` | Enables sandbox containment (`ConfigService.IsTestMode = true`), disables post-run OS sleep/shutdown, and scopes single-instance mutex to `Global\Housekeeping_3_Scoped_<hash>`. |
+| `APP_ISOLATED_TEST=1` | `APP_ISOLATED_TEST=1` | `false` | Automated test isolation mode (`ConfigService.IsIsolatedMode = true`), disabling post-run OS sleep/shutdown and scoping single-instance mutex to `Global\Housekeeping_3_Scoped_<hash>`. |
 | `--dry-run` | `HOUSEKEEPING_DRY_RUN=1`, `DRY_RUN=1` | `false` | Sets `PipelineOrchestrator.ForceDryRun = true` so every manual or scheduled run logs `[DRY]` actions without modifying disk. |
 | `--minimized` / `--tray` / `--silent` | — | `false` | Starts the tray daemon silently without popping open the standalone WebView2 window or browser on startup. |
 | `--managed-by-mother` | — | `false` | Suppresses the standalone system tray icon when supervised by Mother v1.0. |
@@ -92,19 +92,19 @@ Parsed by [`HousekeepingCliParser.Parse`](file:///D:/Projects/Personal/Housekeep
 | :--- | :--- | :--- |
 | `start-daemon.bat` | `scripts\start-daemon.bat` | Starts `Housekeeping.exe --minimized --data-dir "<Root>\data" --log-dir "<Root>\logs"` in the background. |
 | `stop-daemon.bat` | `scripts\stop-daemon.bat` | Sends `POST http://127.0.0.1:5178/api/v1/system/shutdown` (`InitiateGracefulShutdownAbort`, preserving active checkpoints and `PendingRuns`) and exits `0`. |
-| `status-check.bat` | `scripts\status-check.bat` | Executes `Housekeeping.exe --headless --status --data-dir "<Root>\data" --log-dir "<Root>\logs"` and returns exit code. |
+| `status-check.bat` | `scripts\status-check.bat` | Executes `Housekeeping.exe --status --data-dir "<Root>\data" --log-dir "<Root>\logs"` and returns exit code. |
 | `backup-now.bat` | `scripts\backup-now.bat` | Compresses `data\settings.json` and `data\history.json` into `<Root>\backups\manual_backup_<timestamp>.7z` (`-mx=9`, or `.zip` fallback). |
 | `inspect-status.bat` | `scripts\interactive\inspect-status.bat` | Interactive wrapper calling `status-check.bat` followed by `pause`. |
 | `repair-config.bat` | `scripts\interactive\repair-config.bat` | Interactive wrapper calling `Housekeeping.exe --repair-config --data-dir "<Root>\data"` followed by `pause`. |
 | `tail-logs.bat` | `scripts\interactive\tail-logs.bat` | Streams `<Root>\logs\Housekeeping_Live.log` live (`Get-Content -Wait -Tail 40`). |
 
-### 2.3 Installer CLI Flags (`Housekeeping-Setup-v0.1.12-win-x64.exe`)
+### 2.3 Installer CLI Flags (`Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe`)
 Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Installer/Program.cs) and [`Program.DiagnosticsAndCleanup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Installer/Program.DiagnosticsAndCleanup.cs):
 - `--install-dir <dir>` / `--target-dir <dir>`: Target installation root (default `%LOCALAPPDATA%\Programs\Housekeeping`, or `HOUSEKEEPING_INSTALL_DIR` / `INSTALL_DIR`).
-- `--silent` / `--quiet` / `--headless`: Non-interactive console execution (skips WinForms wizard).
+- `--silent` / `--quiet`: Non-interactive console execution (skips WinForms wizard).
 - `--verify`: Verifies embedded `payload.zip` SHA-256 hash against `metadata.json` and exits (`0` = valid).
 - `--dry-run`: Verifies payload and logs planned install actions without mutating disk.
-- `--test-mode`: Enforces fail-closed sandbox path validation (rejects any path outside `Sandbox\` / `Temp\`), skips Windows Registry uninstall keys and Start Menu `.lnk` creation, and requires `--data-dir`, `--config`, and `--log-dir` containment.
+- `--data-dir <dir>`, `--config <file>`, `--log-dir <dir>`: Isolated state/log overrides (suppresses host Registry & Start Menu `.lnk` mutations when explicit `--data-dir` is supplied).
 - `--launch` / `-l` and `--no-launch`: Explicitly launch or suppress launching `Housekeeping.exe` after setup.
 - `--no-shortcuts`: Skips Start Menu and root shortcut creation.
 - `--uninstall` (and optional `--purge-data`): Removes `app\` binaries and uninstall registry entry (preserving `data\`, `logs\`, and `backups\` unless `--purge-data` is passed).
@@ -135,9 +135,8 @@ Parsed by [`Housekeeping.Installer\Program.cs`](file:///D:/Projects/Personal/Hou
 | Resource / Mechanism | Identifier / Value | Scope & Coexistence Rules |
 | :--- | :--- | :--- |
 | **Production HTTP & SignalR Port** | `5178` (`http://127.0.0.1:5178` or `0.0.0.0:5178`) | Configured in `WebServer.Port`, `mother.manifest.json`, and `app\suite.manifest.json`. Falls back to ephemeral `127.0.0.1:0` during non-production/test port collisions. |
-| **Sandbox Verification Port** | `15178` | Passed via `--port 15178` during `Sandbox\` verification so sandbox runs never collide with live production on `:5178`. |
 | **Tailscale Serve HTTPS Port** | `443` (or `8478` in `suite.manifest.json`) | Managed via [`TailscalePwaService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Services/TailscalePwaService.cs) (`tailscale serve --bg --https=443 http://127.0.0.1:5178`). |
-| **Single-Instance Mutex** | `Global\Housekeeping_2_SingleInstance_Mutex` | Switches to `Global\Housekeeping_3_Scoped_<12hex>` whenever any sandbox flag (`--test-mode`, `--dry-run`, `--headless`, `--port`, `--data-dir`, `--config`, `--log-dir`) is present. |
+| **Single-Instance Mutex** | `Global\Housekeeping_2_SingleInstance_Mutex` | Switches to `Global\Housekeeping_3_Scoped_<12hex>` whenever any isolation override (`APP_ISOLATED_TEST=1`, `--dry-run`, `--port`, `--data-dir`, `--config`, `--log-dir`) is present. |
 | **Per-File Distributed Lockfile** | `<finalOutputPath>.hklock` | JSON lockfile written by [`NetworkSafetyService.DistributedLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DistributedLocks.cs) with a 60s heartbeat timer and 90-minute stale reclamation timeout. |
 | **Standard 19 §4 Directory Sentinel** | `<TargetDir>\.<appId>_<pid>.hklock` | JSON `schemaVersion: 1` sentinel written/inspected by [`NetworkSafetyService.DirectoryLocks.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/NetworkSafetyService.DirectoryLocks.cs) carrying `pid` + `processStartTimeUtc`. Automatically evicts dead or recycled-PID locks while deferring when `ShadowLibrary`, `Redroom`, `uStation`, or `StreamEngine` holds a live lock. |
 | **Shared-Root Coexistence Manifest** | `<SharedRoot>\.coexistence.json` | Standard 19 §3 `schemaVersion: 2` manifest managed by [`SisterAppCoexistenceService`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SisterAppCoexistenceService.cs) (`GET /api/v1/coexistence/status`, `POST /api/v1/coexistence/apply-recommendations`) coordinating ownership and `.hash` placement across all 5 peer apps. |
@@ -190,14 +189,14 @@ Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:5178/api/v1/system/backup/
 ### 7.1 End-to-End Build, Sign & Package Pipeline (`build_installer.ps1`)
 Run [`Dev\scripts\build_installer.ps1`](file:///D:/Projects/Personal/Housekeeping/Dev/scripts/build_installer.ps1) from `D:\Projects\Personal\Housekeeping\`:
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Projects\Personal\Housekeeping\Dev\scripts\build_installer.ps1" -Version "0.1.12"
+powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Projects\Personal\Housekeeping\Dev\scripts\build_installer.ps1" -Version "0.1.12-hf.1"
 ```
 What `build_installer.ps1` executes automatically:
 1. Auto-restores `node_modules` if absent and builds the React 19 SPA (`npm --prefix Housekeeping.Web run build`) into `Dev\Housekeeping.Server\wwwroot\`.
-2. Publishes `Housekeeping.DesktopHost`, `Housekeeping.Server`, and `Housekeeping.Launcher` into `Builds\v0.1.12\`, stamping portable zero-PII `Builds\v0.1.12\AGENTS.md` (`<= 40 lines / < 2 KB`), `mother.manifest.json`, `app\suite.manifest.json`, `scripts\`, and `scripts\interactive\`.
-3. Copies all `Housekeeping.Installer\*.cs` partial files into `%TEMP%` staging, builds `payload.zip` + `metadata.json` (with SHA-256 digest and zero-PII audit), and compiles `Installers\Housekeeping-Setup-v0.1.12-win-x64.exe`.
+2. Publishes `Housekeeping.DesktopHost`, `Housekeeping.Server`, and `Housekeeping.Launcher` into `Builds\v0.1.12-hf.1\`, stamping portable zero-PII `Builds\v0.1.12-hf.1\AGENTS.md` (`<= 40 lines / < 2 KB`), `mother.manifest.json`, `app\suite.manifest.json`, `scripts\`, and `scripts\interactive\`.
+3. Copies all `Housekeeping.Installer\*.cs` partial files into `%TEMP%` staging, builds `payload.zip` + `metadata.json` (with SHA-256 digest and zero-PII audit), and compiles `Installers\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe`.
 4. Signs the root launcher, app binaries, and setup `.exe` with Authenticode (`Set-AuthenticodeSignature`).
-5. Mirrors the newest installer to `D:\Projects\Installers\` and packages the 6-file release bundle in `Releases\v0.1.12\`, `Releases\Latest\`, `Releases\v0.1.12.7z`, and `Releases\Latest.7z` (generating sanitized `README.md` from `USER_GUIDE.md` and dynamic `RELEASE_NOTES.md` from `CHANGELOG.md`).
+5. Mirrors the newest installer to `D:\Projects\Installers\` and packages the 6-file release bundle in `Releases\v0.1.12-hf.1\`, `Releases\Latest\`, `Releases\v0.1.12-hf.1.7z`, and `Releases\Latest.7z` (generating sanitized `README.md` from `USER_GUIDE.md` and dynamic `RELEASE_NOTES.md` from `CHANGELOG.md`).
 
 ### 7.2 Safe Production Deployment (`D:\Programs\Housekeeping\`)
 > [!CAUTION]
@@ -207,7 +206,7 @@ What `build_installer.ps1` executes automatically:
 D:\Programs\Housekeeping\scripts\backup-now.bat
 
 # 2. Run the signed installer in silent upgrade mode targeting D:\Programs\Housekeeping
-D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-win-x64.exe --silent --install-dir "D:\Programs\Housekeeping" --launch
+D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe --silent --install-dir "D:\Programs\Housekeeping" --launch
 
 # 3. Verify health & coexistence endpoints
 Invoke-RestMethod -Uri "http://127.0.0.1:5178/api/v1/health"
@@ -222,44 +221,28 @@ If a newly deployed build exhibits regressions:
 
 ---
 
-## 8. Sandbox Verification Recipe (`Sandbox\`)
+## 8. Isolated Verification & Unit Test Recipe (`APP_ISOLATED_TEST=1`)
 
-Before promoting any build, verify the installer, one-shot CLI flags, and headless runtime inside `D:\Projects\Personal\Housekeeping\Sandbox\` with 100% fail-closed isolation:
+Before promoting any build, verify the xUnit suite (`183/183` passing under `APP_ISOLATED_TEST=1`), installer integrity (`--verify`), and one-shot CLI flags cleanly in `%TEMP%` without touching production:
 
 ```powershell
-$setup = "D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-win-x64.exe"
-$sbRoot = "D:\Projects\Personal\Housekeeping\Sandbox"
+$setup = "D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe"
+$isoRoot = Join-Path $env:TEMP "hk_iso_check"
 
 # 1. Verify embedded payload SHA-256
 & $setup --verify
 
-# 2. Run --test-mode install into Sandbox\app
-& $setup --test-mode --silent `
-  --install-dir "$sbRoot\app" `
-  --data-dir "$sbRoot\data" `
-  --config "$sbRoot\data\settings.json" `
-  --log-dir "$sbRoot\logs" `
+# 2. Run dry-run install verification in isolated TEMP root
+& $setup --silent --dry-run `
+  --install-dir "$isoRoot\app" `
+  --data-dir "$isoRoot\data" `
+  --config "$isoRoot\data\settings.json" `
+  --log-dir "$isoRoot\logs" `
   --no-shortcuts --no-launch
 
 # 3. Verify synchronous one-shot CLI flags (--status & --repair-config)
-& "$sbRoot\app\Housekeeping.exe" --status --data-dir "$sbRoot\data" --log-dir "$sbRoot\logs"
-& "$sbRoot\app\Housekeeping.exe" --repair-config --data-dir "$sbRoot\data"
-
-# 4. Boot headless sandbox instance on port 15178 with --test-mode and --dry-run
-$proc = Start-Process -FilePath "$sbRoot\app\Housekeeping.exe" -ArgumentList @(
-  "--headless", "--localhost-only", "--test-mode", "--dry-run",
-  "--port", "15178",
-  "--data-dir", "$sbRoot\data",
-  "--config", "$sbRoot\data\settings.json",
-  "--log-dir", "$sbRoot\logs"
-) -PassThru
-
-# 5. Probe sandbox health, coexistence, scheduler & doctor endpoints, then shut down cleanly
-Start-Sleep -Seconds 3
-Invoke-RestMethod -Uri "http://127.0.0.1:15178/api/v1/health"
-Invoke-RestMethod -Uri "http://127.0.0.1:15178/api/v1/coexistence/status"
-Invoke-RestMethod -Uri "http://127.0.0.1:15178/api/scheduler/status"
-Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:15178/api/v1/system/shutdown"
+& "D:\Projects\Personal\Housekeeping\Builds\v0.1.12-hf.1\Housekeeping.exe" --status --data-dir "$isoRoot\data" --log-dir "$isoRoot\logs"
+& "D:\Projects\Personal\Housekeeping\Builds\v0.1.12-hf.1\Housekeeping.exe" --repair-config --data-dir "$isoRoot\data"
 ```
 
 ---

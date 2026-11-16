@@ -169,7 +169,7 @@ namespace Housekeeping.Tests
                 };
                 File.WriteAllText(Path.Combine(sharedVault, ".coexistence.json"), JsonSerializer.Serialize(manifest, ConfigService.JsonOptions));
 
-                var cfgSvc = new ConfigService(customBaseDir: dataDir, isTestMode: true);
+                var cfgSvc = new ConfigService(customBaseDir: dataDir, isolatedOverride: true);
                 cfgSvc.MutateAndSave(c =>
                 {
                     c.CollectionManifest.CreateMissingHashFiles = true;

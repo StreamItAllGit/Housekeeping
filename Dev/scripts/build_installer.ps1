@@ -69,15 +69,29 @@ New-Item -ItemType Directory -Force -Path $appDir | Out-Null
     Copy-Item -LiteralPath (Join-Path $launcherTemp "Housekeeping.exe") -Destination (Join-Path $buildSource "Housekeeping.exe") -Force
     Remove-Item -LiteralPath $launcherTemp -Recurse -Force -ErrorAction SilentlyContinue
 
-    # 4. Copy scripts, manifests, and portable runtime AGENTS.md (zero local dev/prod paths)
+    # 4. Copy LICENSE, scripts, manifests, and portable runtime AGENTS.md (zero local dev/prod paths)
     Copy-Item -LiteralPath (Join-Path $devRoot "version.txt") -Destination (Join-Path $appDir "version.txt") -Force
+    $licenseSrc = Join-Path $projectRoot "LICENSE"
+    if (Test-Path -LiteralPath $licenseSrc) {
+        Copy-Item -LiteralPath $licenseSrc -Destination (Join-Path $buildSource "LICENSE") -Force
+        Copy-Item -LiteralPath $licenseSrc -Destination (Join-Path $appDir "LICENSE") -Force
+    }
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
     $motherManifestSrc = Join-Path $devRoot "mother.manifest.json"
+    $suiteManifestSrc = Join-Path $devRoot "suite.manifest.json"
+    $stampUtc = [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')
     if (Test-Path -LiteralPath $motherManifestSrc) {
         $manifestRaw = Get-Content -LiteralPath $motherManifestSrc -Raw -Encoding UTF8
-        $manifestStamped = [regex]::Replace($manifestRaw, '"updatedAtUtc"\s*:\s*"[^"]*"', "`"updatedAtUtc`": `"$([DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'))`"")
+        $manifestStamped = [regex]::Replace($manifestRaw, '"updatedAtUtc"\s*:\s*"[^"]*"', "`"updatedAtUtc`": `"$stampUtc`"")
         [System.IO.File]::WriteAllText((Join-Path $buildSource "mother.manifest.json"), $manifestStamped, $utf8NoBom)
-        [System.IO.File]::WriteAllText((Join-Path $appDir "suite.manifest.json"), $manifestStamped, $utf8NoBom)
+        if (-not (Test-Path -LiteralPath $suiteManifestSrc)) {
+            [System.IO.File]::WriteAllText((Join-Path $appDir "suite.manifest.json"), $manifestStamped, $utf8NoBom)
+        }
+    }
+    if (Test-Path -LiteralPath $suiteManifestSrc) {
+        $suiteRaw = Get-Content -LiteralPath $suiteManifestSrc -Raw -Encoding UTF8
+        $suiteStamped = [regex]::Replace($suiteRaw, '"updatedAtUtc"\s*:\s*"[^"]*"', "`"updatedAtUtc`": `"$stampUtc`"")
+        [System.IO.File]::WriteAllText((Join-Path $appDir "suite.manifest.json"), $suiteStamped, $utf8NoBom)
     }
 
     $portableAgentsTemplate = @'
@@ -91,7 +105,7 @@ New-Item -ItemType Directory -Force -Path $appDir | Out-Null
   - `./backups/` (`config_snapshots/` & state archives)
   - `./logs/` (`Housekeeping_Live.log`, `telemetry_heartbeat.json`, `runs/`, `crashes/`)
   - `./scripts/` (`start-daemon.bat`, `stop-daemon.bat`, `status-check.bat`, `interactive/repair-config.bat`)
-- **Safety Invariants:** Never overwrite `./data/` user state during upgrades. Use `--test-mode --dry-run` with isolated `--data-dir` and `--log-dir` for verification.
+- **Safety Invariants:** Never overwrite `./data/` user state during upgrades. Use `--dry-run` with isolated `--data-dir` and `--log-dir` for verification.
 '@
     $portableAgentsContent = $portableAgentsTemplate.Replace('{VER}', $Version)
     $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
@@ -288,7 +302,7 @@ try {
     Write-Host "Mirrored latest installer to central hub: $centralTarget"
 
     # 6. Run global 4-pillar audit_installer.ps1 gate
-    $auditorScript = "%USERPROFILE%\.gemini\config\skills\release-packaging\scripts\audit_installer.ps1"
+    $auditorScript = "%USERPROFILE%\.gemini\config\skills\dev\scripts\audit_installer.ps1"
     if (Test-Path -LiteralPath $auditorScript) {
         & powershell -NoProfile -ExecutionPolicy Bypass -File $auditorScript -InstallerPath $installersDir -StagingDir $buildSource -ExpectedVersion $Version
         if ($LASTEXITCODE -ne 0) { throw "audit_installer.ps1 failed with exit code $LASTEXITCODE" }

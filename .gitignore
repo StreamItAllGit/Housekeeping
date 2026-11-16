@@ -1,11 +1,10 @@
 # ==============================================================================
-# 1. 6-Folder Outer Container Exclusions (Local / Packaged / Ephemeral)
+# 1. 5-Folder Outer Container Exclusions (Local / Packaged / Ephemeral)
 # ==============================================================================
 /Archive/
 /Builds/
 /Installers/
 /Releases/
-/Sandbox/
 
 # ==============================================================================
 # 2. Toolchains, Virtual Environments & Package Caches
@@ -45,11 +44,10 @@ __pycache__/
 *.csproj
 *.unityproj
 *.sln
-!Dev/src/**/*.csproj
-!Dev/tests/**/*.csproj
-!Dev/Launcher/**/*.csproj
-!Dev/Installer/**/*.csproj
+*.slnx
+!Dev/**/*.csproj
 !Dev/*.sln
+!Dev/*.slnx
 
 # ==============================================================================
 # 5. Runtime Databases, Secrets, Logs & Large Raw Media Captures
@@ -74,4 +72,7 @@ Dev/logs/
 *.mp4
 *.mov
 Thumbs.db
+desktop.ini
+ehthumbs.db
 .DS_Store
+._*

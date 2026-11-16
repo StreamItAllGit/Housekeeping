@@ -1,8 +1,8 @@
 # Housekeeping — Interfaces, REST API, SignalR & File Contracts Manual
 
 - **Document:** `INTERFACES.md` (Technical Manual 4 of 4)
-- **Active Build Version:** `v0.1.12` (Universal SemVer `PATCH+1`)
-- **HTTP & SignalR Base URL:** `http://127.0.0.1:5178` (Sandbox: `http://127.0.0.1:15178` · Tailscale Serve HTTPS: `https://<node>.<tailnet>.ts.net`)
+- **Active Build Version:** `v0.1.12-hf.1` (Universal SemVer `PATCH+1`)
+- **HTTP & SignalR Base URL:** `http://127.0.0.1:5178` (Tailscale Serve HTTPS: `https://<node>.<tailnet>.ts.net`)
 - **Primary Source Anchors:** [`HousekeepingApiEndpoints.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L1-L1409) · [`HousekeepingHub.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Hubs/HousekeepingHub.cs#L14-L108) · [`TieredAuthService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Security/TieredAuthService.cs#L17-L396) · [`HashSidecarService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/HashSidecarService.cs#L1-L2727)
 
 ---
@@ -32,7 +32,7 @@ All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](f
 ### 2.1 Health, Mother Fleet Supervision & Graceful Shutdown
 | Method | Route | Source Line | Request / Query | Response Payload & Notes |
 | :---: | :--- | :---: | :--- | :--- |
-| `GET` | `/api/v1/health` | [`L31-L55`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L31-L55) | Public | `{ status: "healthy", service: "Housekeeping", version, archetype: "2-tray-companion", port, pid, uptimeSeconds, testMode, dryRun, isRunning, activeQueue, activeJob, progressPercent, pendingSwapCount, timestampUtc }` |
+| `GET` | `/api/v1/health` | [`L108-L117`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L108-L117) | Public | `{ status: "ok", version, machineName, isRunning, isIsolated, forceDryRun, timestampUtc }` |
 | `GET` | `/api/scheduler/status` | [`L61-L82`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L61-L82) | Auth | `{ service: "Housekeeping", isRunning, isPaused, activeQueueId, activeQueueName, activeJobId, activeJobName, progressPercent, deferredUntilUtc, nextScheduledRunUtc, nextScheduledQueueName, nextRunStatusText, guardedProcessRunning, activeGuardedProcess }` |
 | `POST` | `/api/scheduler/defer` | [`L84-L110`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L84-L110) | `{ "minutes": 30, "reason": "Mother disk arbitration" }` | Defers background schedule evaluation for `minutes` (`0` clears deferral). Returns `{ ok: true, deferredUntilUtc, message }`. |
 | `POST` | `/api/v1/system/shutdown` (`/api/system/shutdown`) | [`SystemDoctorAndBackup.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.SystemDoctorAndBackup.cs) | Direct Loopback or `NodeApiToken` (`403` otherwise) | Invokes `InitiateGracefulShutdownAbort()` (preserving `interrupted_run_checkpoint.json` & `PendingRuns`) and stops Kestrel/STA host after 150ms. |
@@ -49,7 +49,7 @@ All routes are mapped in [`HousekeepingApiEndpoints.MapHousekeepingEndpoints`](f
 | `GET` | `/api/v1/tailscale/pwa-status` | [`L302-L309`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L302-L309) | — | Returns `TailscalePwaStatusDto` (`TailscaleAvailable`, `BackendState`, `DnsName`, `HttpsPwaUrl`, `ServeConfigured`, `PendingAuthUrl`). |
 | `POST` | `/api/v1/tailscale/enable-pwa` | [`L311-L319`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L311-L319) | — | Provisions `tailscale serve --bg --https=443 http://127.0.0.1:<port>`. |
 | `POST` | `/api/v1/tailscale/disable-pwa` | [`L321-L329`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L321-L329) | — | Runs `tailscale serve reset`. |
-| `POST` | `/api/v1/desktop/open-window` | [`L331-L343`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L331-L343) | — | Invokes `TrayDaemonApplicationContext.ShowOrActivateStandaloneWindow()` on the desktop host (`400` if running `--headless`). |
+| `POST` | `/api/v1/desktop/open-window` | [`L331-L343`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs#L331-L343) | — | Invokes `TrayDaemonApplicationContext.ShowOrActivateStandaloneWindow()` on the desktop host (`400` if no interactive tray context is attached). |
 
 ### 2.3 Configuration, 20-Snapshot History & Profile Import/Export
 | Method | Route | Source Line | Request / Query | Response Payload & Notes |
@@ -143,7 +143,7 @@ Implemented in [`HousekeepingHub.cs`](file:///D:/Projects/Personal/Housekeeping/
 
 ## 4. Model Context Protocol (MCP) & Sister-App Integration Seams
 
-Housekeeping **does not expose an MCP server (`/mcp`)**. Instead, sister applications in the 3-Tier Ecosystem integrate with Housekeeping through three deterministic seams:
+Housekeeping **does not expose an MCP server (`/mcp`)**. Instead, sister applications integrate with Housekeeping through three deterministic seams:
 1. **Mother v1.0 Fleet Daemon ([`mother.manifest.json`](file:///D:/Projects/Personal/Housekeeping/Dev/mother.manifest.json)):** Polls `GET /api/v1/health` and `<LogsDir>\telemetry_heartbeat.json`, inspects `GET /api/scheduler/status`, defers heavy disk/transcode schedules via `POST /api/scheduler/defer`, and triggers graceful shutdown via `POST /api/system/shutdown`.
 2. **Greenroom Companion (`:8420` via [`GreenroomSyncIntegrationService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/GreenroomSyncIntegrationService.cs#L170-L321)):** Whenever Module 4 (`RomLauncherGenerator`) or Module 8 (`CollectionManifest`) writes a changed manifest CSV/JSON (verified by SHA-256 file fingerprint diffing in [`PipelineOrchestratorService.cs#L1508-L1593`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/PipelineOrchestratorService.cs#L1508-L1593)), Housekeeping POSTs `{ "tasks": ["collect_library", "verify_hashes"], "source": "Housekeeping", "changedManifests": [...] }` to `http://127.0.0.1:8420/api/sync` (or invokes `run_greenroom.bat` if `:8420` is offline).
 3. **ShadowLibrary Shared Storage & `.hash` Sidecars:** Housekeeping and ShadowLibrary share the `.hash` sidecar format (Section 6.1) across ROM and media roots.
@@ -213,7 +213,7 @@ Housekeeping **does not expose an MCP server (`/mcp`)**. Instead, sister applica
     "lockType": "directory-mutation",
     "suiteId": "mother",
     "ownerAppId": "housekeeping",
-    "version": "0.1.12",
+    "version": "0.1.12-hf.1",
     "pid": 14820,
     "processStartTimeUtc": "2026-11-11T08:00:00.0000000Z",
     "hostname": "MEDIA-WORKSTATION",
@@ -235,7 +235,7 @@ Written by [`CollectionManifestModule.Exporters.cs`](file:///D:/Projects/Persona
 Base columns: `LocationID,RootPath,RelativePath,FileName,CleanTitle,Category,YearOrRegion,ResolutionOrTags,FileSizeBytes,FileSizeFormatted,CRC32,SHA1,MD5,IntegrityStatus,IntegrityDetail` followed dynamically by every enabled custom regex/text rule column name (`CustomFields`).
 
 ### 6.5 Suite, Shared-Root Coexistence & Post-Injection Container Registries
-- **Suite Companion Manifest ([`mother.manifest.json`](file:///D:/Projects/Personal/Housekeeping/Dev/mother.manifest.json) / `app\suite.manifest.json`, `schemaVersion: 2`):** Carries the canonical Standard 19 §3 6-field `camelCase` header (`$schema`, `schemaVersion`, `manifestType`, `appId`, `version`, `updatedAtUtc`) plus `suiteId`, `port` (`5178`), `httpsPort` (`8478`), `sandboxPort` (`15178`), `coexistenceStatusEndpoint` (`"/api/v1/coexistence/status"`), `commands`, `endpoints`, and `paths`.
+- **Suite Companion Manifest ([`mother.manifest.json`](file:///D:/Projects/Personal/Housekeeping/Dev/mother.manifest.json) / `app\suite.manifest.json`, `schemaVersion: 2`):** Carries the canonical Standard 19 §3 6-field `camelCase` header (`$schema`, `schemaVersion`, `manifestType`, `appId`, `version`, `updatedAtUtc`) plus `suiteId`, `port` (`5178`), `httpsPort` (`8478`), `coexistenceStatusEndpoint` (`"/api/v1/coexistence/status"`), `commands`, `endpoints`, and `paths`.
 - **Shared-Root Coexistence Manifest (`<SharedRoot>\.coexistence.json`, `schemaVersion: 2` via [`SisterAppCoexistenceService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/SisterAppCoexistenceService.cs)):**
   ```json
   {
@@ -243,7 +243,7 @@ Base columns: `LocationID,RootPath,RelativePath,FileName,CleanTitle,Category,Yea
     "schemaVersion": 2,
     "manifestType": "shared-root-coexistence",
     "appId": "housekeeping",
-    "version": "0.1.12",
+    "version": "0.1.12-hf.1",
     "updatedAtUtc": "2026-11-12T03:45:00Z",
     "coexistenceMode": "Co-Audit (Zero-Rewrite)",
     "hashFilePlacement": "SidecarBeside",
@@ -251,7 +251,7 @@ Base columns: `LocationID,RootPath,RelativePath,FileName,CleanTitle,Category,Yea
     "owners": {
       "housekeeping": {
         "appId": "housekeeping",
-        "version": "0.1.12",
+        "version": "0.1.12-hf.1",
         "port": 5178,
         "updatedAtUtc": "2026-11-12T03:45:00Z",
         "modules": ["CollectionManifest"],
@@ -267,7 +267,7 @@ Base columns: `LocationID,RootPath,RelativePath,FileName,CleanTitle,Category,Yea
     "schemaVersion": 1,
     "updatedAtUtc": "2026-11-12T03:45:00Z",
     "updatedByApp": "housekeeping",
-    "updatedByVersion": "0.1.12",
+    "updatedByVersion": "0.1.12-hf.1",
     "hashFilePlacement": "PackageInsideArchive",
     "archives": {
       "Chrono Trigger (USA).7z": {

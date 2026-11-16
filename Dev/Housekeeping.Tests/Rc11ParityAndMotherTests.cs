@@ -14,10 +14,10 @@ namespace Housekeeping.Tests
         [Fact]
         public void CliParser_ManagedByMother_SetsFlagAndMinimized()
         {
-            var cli = HousekeepingCliParser.Parse(new[] { "--managed-by-mother", "--port", "15178" });
+            var cli = HousekeepingCliParser.Parse(new[] { "--managed-by-mother", "--port", "5198" });
             Assert.True(cli.ManagedByMother);
             Assert.True(cli.StartMinimized);
-            Assert.Equal(15178, cli.PortOverride);
+            Assert.Equal(5198, cli.PortOverride);
         }
 
         [Fact]
@@ -145,7 +145,7 @@ namespace Housekeeping.Tests
                 // 2. Verify ConfigService initialized on appDir with a root settings.json migrates to data\ and resolves sibling logs\ & backups\
                 File.WriteAllText(rootSettingsPath, JsonSerializer.Serialize(canonicalCfg, ConfigService.JsonOptions));
                 File.WriteAllText(appSettingsPath, "{ \"NamedQueues\": [] }");
-                var svc = new ConfigService(customBaseDir: appDir, isTestMode: true);
+                var svc = new ConfigService(customBaseDir: appDir, isolatedOverride: true);
                 Assert.Equal(Path.GetFullPath(expectedDataDir), Path.GetFullPath(svc.DataDirectory));
                 Assert.Equal(Path.GetFullPath(Path.Combine(rootDir, "logs")), Path.GetFullPath(svc.ActiveLogsDir));
                 Assert.Equal(Path.GetFullPath(Path.Combine(rootDir, "backups", "config_snapshots")), Path.GetFullPath(svc.SnapshotsDir));
@@ -176,7 +176,7 @@ namespace Housekeeping.Tests
                 """;
                 File.WriteAllText(Path.Combine(tempDir, "settings.json"), legacyV3Json);
 
-                var svc = new ConfigService(customBaseDir: tempDir, isTestMode: true);
+                var svc = new ConfigService(customBaseDir: tempDir, isolatedOverride: true);
                 Assert.Equal(4, svc.Config.ConfigVersion);
                 Assert.Equal("StandaloneWindow", svc.Config.WebServer.DefaultDesktopLaunchMode);
             }

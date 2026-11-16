@@ -150,12 +150,12 @@ namespace Housekeeping.Services
                 }
                 if (!string.IsNullOrWhiteSpace(fvi.FileVersion))
                     return fvi.FileVersion.Trim();
-                return asm.GetName().Version?.ToString() ?? "0.1.12";
+                return asm.GetName().Version?.ToString() ?? "0.1.12-hf.1";
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[RemoteNodeDeploymentService] GetLocalAppVersion fallback: {ex.Message}");
-                return "0.1.12";
+                return "0.1.12-hf.1";
             }
         }
 

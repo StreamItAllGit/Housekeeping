@@ -26,7 +26,7 @@ namespace Housekeeping.Server.Hosting
         public string? CustomConfigFilePath { get; set; }
         public string? CustomLogsDirectory { get; set; }
         public string? CustomWebRootPath { get; set; }
-        public bool TestMode { get; set; }
+        public bool IsolatedOverride { get; set; }
         public bool DryRun { get; set; }
         public bool StartBackgroundTimers { get; set; } = true;
         public HttpClient? CustomGreenroomHttpClient { get; set; }
@@ -64,7 +64,7 @@ namespace Housekeeping.Server.Hosting
                 startBackgroundTimers: options.StartBackgroundTimers,
                 customConfigFilePath: options.CustomConfigFilePath,
                 customLogsDirectory: options.CustomLogsDirectory,
-                isTestMode: options.TestMode,
+                isolatedOverride: options.IsolatedOverride,
                 forceDryRun: options.DryRun);
 
             if (options.NativeDialogBridge != null)

@@ -164,7 +164,7 @@ namespace Housekeeping.Tests
             string tempDir = CreateTempTestDir();
             try
             {
-                var configService = new ConfigService(customBaseDir: tempDir, isTestMode: true);
+                var configService = new ConfigService(customBaseDir: tempDir, isolatedOverride: true);
 
                 // Browser takes an initial snapshot when LastScheduledRunUtc is null
                 var staleBrowserDraft = configService.Config.DeepClone();
@@ -180,7 +180,7 @@ namespace Housekeeping.Tests
                 }));
 
                 // Verify settings.json on disk persisted LastScheduledRunUtc
-                var reloaded = new ConfigService(customBaseDir: tempDir, isTestMode: true);
+                var reloaded = new ConfigService(customBaseDir: tempDir, isolatedOverride: true);
                 Assert.Equal(serverStampUtc, reloaded.Config.CollectionManifest.LastScheduledRunUtc);
 
                 // Browser now saves its stale draft (where LastScheduledRunUtc was still null)
@@ -227,7 +227,7 @@ namespace Housekeeping.Tests
                     capturedEx,
                     logsDirOverride: logsDir,
                     buildVersionOverride: "1.0.0-rc.10",
-                    testModeOverride: true,
+                    isolatedModeOverride: true,
                     archetypeOverride: "2-tray-companion",
                     logBufferOverride: logBuffer);
 
@@ -245,7 +245,7 @@ namespace Housekeeping.Tests
                 Assert.Equal("Housekeeping", bundle.AppName);
                 Assert.Equal("1.0.0-rc.10", bundle.BuildVersion);
                 Assert.Equal("2-tray-companion", bundle.Archetype);
-                Assert.True(bundle.TestMode);
+                Assert.True(bundle.IsolatedMode);
                 Assert.True(bundle.Process.Pid > 0);
                 Assert.Equal("System.InvalidOperationException", bundle.Exception.Type);
                 Assert.Contains("%USERPROFILE%", bundle.Exception.Message);
@@ -287,7 +287,7 @@ namespace Housekeeping.Tests
                     new ApplicationException("Retention cap verification crash"),
                     logsDirOverride: logsDir,
                     buildVersionOverride: "1.0.0-rc.10",
-                    testModeOverride: true);
+                    isolatedModeOverride: true);
 
                 Assert.NotNull(newestBundle);
                 var remaining = Directory.GetFiles(crashesDir, "crash_*.json");

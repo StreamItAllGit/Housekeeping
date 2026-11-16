@@ -14,8 +14,6 @@ namespace Housekeeping.Server.Hosting
         public bool StartMinimized { get; set; }
         public bool IsWatchdog { get; set; }
         public bool ManagedByMother { get; set; }
-        public bool Headless { get; set; }
-        public bool TestMode { get; set; }
         public bool DryRun { get; set; }
         public bool? BindLanOverride { get; set; }
         public int? PortOverride { get; set; }
@@ -25,14 +23,13 @@ namespace Housekeeping.Server.Hosting
         public string[] RemainingArgs { get; set; } = Array.Empty<string>();
         public string? ParseError { get; set; }
 
-        public bool IsSandboxedInvocation =>
-            TestMode ||
+        public bool IsIsolatedInvocation =>
             DryRun ||
-            Headless ||
             PortOverride.HasValue ||
             !string.IsNullOrWhiteSpace(CustomDataDirectory) ||
             !string.IsNullOrWhiteSpace(CustomConfigFilePath) ||
-            !string.IsNullOrWhiteSpace(CustomLogsDirectory);
+            !string.IsNullOrWhiteSpace(CustomLogsDirectory) ||
+            string.Equals(Environment.GetEnvironmentVariable("APP_ISOLATED_TEST"), "1", StringComparison.OrdinalIgnoreCase);
     }
 
     public static class HousekeepingCliParser
@@ -67,7 +64,8 @@ namespace Housekeeping.Server.Hosting
                     result.RunRepairConfig = true;
                 }
                 else if (string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase))
+                         string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(a, "--tray-only", StringComparison.OrdinalIgnoreCase))
                 {
                     result.StartMinimized = true;
                 }
@@ -80,14 +78,6 @@ namespace Housekeeping.Server.Hosting
                 {
                     result.ManagedByMother = true;
                     result.StartMinimized = true;
-                }
-                else if (string.Equals(a, "--headless", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.Headless = true;
-                }
-                else if (string.Equals(a, "--test-mode", StringComparison.OrdinalIgnoreCase))
-                {
-                    result.TestMode = true;
                 }
                 else if (string.Equals(a, "--dry-run", StringComparison.OrdinalIgnoreCase))
                 {
@@ -168,11 +158,6 @@ namespace Housekeeping.Server.Hosting
                 }
             }
 
-            if (!result.TestMode && IsTruthyEnv("HOUSEKEEPING_TEST_MODE", "TEST_MODE"))
-            {
-                result.TestMode = true;
-            }
-
             if (!result.DryRun && IsTruthyEnv("HOUSEKEEPING_DRY_RUN", "DRY_RUN"))
             {
                 result.DryRun = true;
@@ -203,18 +188,16 @@ namespace Housekeeping.Server.Hosting
             sb.AppendLine("  --log-dir <dir>        Write live logs and telemetry_heartbeat.json exclusively to <dir>");
             sb.AppendLine("                         (Env: HOUSEKEEPING_LOG_DIR, LOG_DIR)");
             sb.AppendLine();
-            sb.AppendLine("Hosting, Sandbox & Execution Hooks:");
+            sb.AppendLine("Hosting & Execution Options:");
             sb.AppendLine("  --port <1-65535>       Override Kestrel HTTP listening port (Env: HOUSEKEEPING_PORT, PORT)");
             sb.AppendLine("  --localhost-only       Bind strictly to 127.0.0.1 loopback (disable LAN/Tailnet listener)");
-            sb.AppendLine("  --headless             Run Kestrel + SignalR server directly without System Tray or WebView2 GUI");
             sb.AppendLine("  --status               Print one-shot JSON daemon & configuration status and exit");
             sb.AppendLine("  --repair-config        Validate, migrate, or quarantine/recover settings.json and exit");
-            sb.AppendLine("  --test-mode            Enable sandboxed test mode (suppresses host Registry, Task Scheduler,");
-            sb.AppendLine("                         Tailscale Serve, and OS sleep/shutdown mutations; Env: HOUSEKEEPING_TEST_MODE=1)");
             sb.AppendLine("  --dry-run              Force all pipeline and job dispatches into non-destructive dry-run mode");
             sb.AppendLine("                         (Env: HOUSEKEEPING_DRY_RUN=1)");
-            sb.AppendLine("  --minimized, --silent  Start in System Tray without opening a browser/WebView2 window on launch");
-            sb.AppendLine("  --watchdog             Internal Task Scheduler watchdog invocation (implies --minimized)");
+            sb.AppendLine("  --tray-only, --minimized, --silent");
+            sb.AppendLine("                         Start in System Tray without opening a browser/WebView2 window on launch");
+            sb.AppendLine("  --watchdog             Internal Task Scheduler watchdog invocation (implies --tray-only)");
             sb.AppendLine("  --managed-by-mother    Managed child daemon mode under Mother v1.0 (suppresses standalone system tray icon)");
             sb.AppendLine("  --version, -v          Print current application version and exit");
             sb.AppendLine("  --help, -h             Show this command-line reference and exit");

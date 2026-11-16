@@ -22,7 +22,7 @@ public sealed class InstallerWizardForm : Form
     private readonly EmbeddedMetadata _meta;
     private readonly string? _dataDir;
     private readonly string? _logDir;
-    private readonly bool _testMode;
+    private readonly bool _isolatedMode;
     private readonly bool _initialUninstallMode;
 
     private readonly Panel _headerPanel;
@@ -73,14 +73,14 @@ public sealed class InstallerWizardForm : Form
         string? initialInstallDir,
         string? dataDir = null,
         string? logDir = null,
-        bool testMode = false,
+        bool isolatedMode = false,
         bool isUninstallMode = false,
         bool initialCreateShortcuts = true)
     {
         _meta = meta ?? throw new ArgumentNullException(nameof(meta));
         _dataDir = dataDir;
         _logDir = logDir;
-        _testMode = testMode;
+        _isolatedMode = isolatedMode;
         _initialUninstallMode = isUninstallMode;
 
         Text = isUninstallMode
@@ -483,7 +483,7 @@ public sealed class InstallerWizardForm : Form
         if (_completedSuccessfully && !_launchedAfterSetup)
         {
             bool isUninst = _initialUninstallMode || _radUninstall.Checked;
-            if (!isUninst && _chkLaunchAfter.Checked && !_testMode)
+            if (!isUninst && _chkLaunchAfter.Checked && !_isolatedMode)
             {
                 _launchedAfterSetup = true;
                 Program.TryLaunchInstalledHousekeeping(_completedInstallDir, _logDir);
@@ -497,7 +497,7 @@ public sealed class InstallerWizardForm : Form
         if (_completedSuccessfully)
         {
             bool isUninst = _initialUninstallMode || _radUninstall.Checked;
-            if (!isUninst && _chkLaunchAfter.Checked && !_testMode && !_launchedAfterSetup)
+            if (!isUninst && _chkLaunchAfter.Checked && !_isolatedMode && !_launchedAfterSetup)
             {
                 _launchedAfterSetup = true;
                 Program.TryLaunchInstalledHousekeeping(_completedInstallDir, _logDir);
@@ -526,7 +526,7 @@ public sealed class InstallerWizardForm : Form
             {
                 if (isUninstall)
                 {
-                    return Program.RunUninstall(targetDir, _dataDir, _logDir, _testMode, dryRun: false, purgeData, _meta);
+                    return Program.RunUninstall(targetDir, _dataDir, _logDir, _isolatedMode, dryRun: false, purgeData, _meta);
                 }
                 else
                 {
@@ -534,7 +534,7 @@ public sealed class InstallerWizardForm : Form
                         targetDir,
                         _dataDir,
                         _logDir,
-                        _testMode,
+                        _isolatedMode,
                         dryRun: false,
                         createShortcuts,
                         _meta,

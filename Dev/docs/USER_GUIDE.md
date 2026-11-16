@@ -1,7 +1,7 @@
 # Housekeeping — End-User Manual & Complete UI Guide
 
 - **Document:** `USER_GUIDE.md` (Technical Manual 2 of 4)
-- **Active Build Version:** `v0.1.12`
+- **Active Build Version:** `v0.1.12-hf.1`
 - **Default Desktop UI:** Disposable Edge WebView2 Standalone Window (`DefaultDesktopLaunchMode: "StandaloneWindow"`) + System Tray Companion (`http://127.0.0.1:5178`)
 - **Remote / Mobile UI:** LAN Web Browser (`http://<host>:5178`) & Tailscale Serve HTTPS PWA (`https://<node>.<tailnet>.ts.net`)
 
@@ -26,24 +26,24 @@
 ## 2. Install, Upgrade & Uninstall
 
 ### 2.1 Installing or Upgrading with the Setup Wizard
-1. Run **`Housekeeping-Setup-v0.1.12-win-x64.exe`** from `Installers\` or `Releases\Latest\`.
+1. Run **`Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe`** from `Installers\` or `Releases\Latest\`.
 2. **Welcome & Target Location:** Choose your installation root (defaults to `D:\Programs\Housekeeping` when an existing canonical install is detected, or `%LOCALAPPDATA%\Programs\Housekeeping`).
 3. **Shortcut Options:** Choose whether to create a Windows Start Menu shortcut and root launcher.
 4. **Automatic State & Checkpoint Preservation on Upgrade:** If Housekeeping is already running, the installer triggers a graceful daemon shutdown (`InitiateGracefulShutdownAbort`), preserving any active `data\interrupted_run_checkpoint.json` and `Up Next` queue (`PendingRuns`), migrates any legacy root files into `<InstallRoot>\data\`, preserves `data\settings.json`, `data\history.json`, `data\compliance_reports.json`, `data\dats\`, `data\manifests\`, `backups\`, and `logs\`, extracts the updated `app\` binaries, and relaunches Housekeeping.
 
-### 2.2 Headless / CLI Installer Commands
+### 2.2 Unattended / CLI Installer Commands
 ```powershell
 # Verify embedded payload SHA-256 integrity without writing to disk
-.\Housekeeping-Setup-v0.1.12-win-x64.exe --verify
+.\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe --verify
 
 # Silent install or upgrade to canonical production path and launch
-.\Housekeeping-Setup-v0.1.12-win-x64.exe --silent --install-dir "D:\Programs\Housekeeping" --launch
+.\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe --silent --install-dir "D:\Programs\Housekeeping" --launch
 
 # Uninstall binaries while preserving data\ and logs\
-.\Housekeeping-Setup-v0.1.12-win-x64.exe --uninstall --install-dir "D:\Programs\Housekeeping"
+.\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe --uninstall --install-dir "D:\Programs\Housekeeping"
 
 # Full uninstall including user data, settings, and logs
-.\Housekeeping-Setup-v0.1.12-win-x64.exe --uninstall --install-dir "D:\Programs\Housekeeping" --purge-data
+.\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe --uninstall --install-dir "D:\Programs\Housekeeping" --purge-data
 ```
 
 ---
@@ -198,7 +198,7 @@
   - **📂 Open Data Folder** / **📄 Open Live Log**
   - **✕ Exit Housekeeping** (invokes `InitiateGracefulShutdownAbort()` so any active `interrupted_run_checkpoint.json` and `Up Next` runs are preserved for next launch)
 - **Game & Streaming Process Guard:** When `EnableProcessGuard` is checked in **Settings $\rightarrow$ Startup & Process Guard**, Housekeeping checks every 15 seconds whether any guarded executable (`obs64`, `retroarch`, `pcsx2-qt`, `duckstation`, `rpcs3`, `dolphin`, etc.) is running. Scheduled queues due during gameplay are cleanly deferred until the game or stream closes.
-- **Post-Run Power Actions:** Configure `StayAwake`, `Sleep`, or `Shutdown` to trigger automatically after a long overnight transcode or backup queue finishes (skipped automatically during Dry Runs and `--test-mode`).
+- **Post-Run Power Actions:** Configure `StayAwake`, `Sleep`, or `Shutdown` to trigger automatically after a long overnight transcode or backup queue finishes (skipped automatically during `--dry-run` and `APP_ISOLATED_TEST=1` test runs).
 
 ---
 

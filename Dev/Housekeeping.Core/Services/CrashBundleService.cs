@@ -39,13 +39,13 @@ namespace Housekeeping.Services
         private static Func<string>? _logsDirProvider;
         private static Func<TerminalLogBufferService?>? _logBufferProvider;
         private static string _buildVersion = CrashBundleExceptionFilter.DefaultFallbackVersion;
-        private static bool _testMode;
+        private static bool _isolatedMode;
         private static string _archetype = "2-tray-companion";
 
         public static void RegisterGlobalHandlers(
             Func<string> getLogsDir,
             string buildVersion,
-            bool testMode,
+            bool isolatedMode,
             string archetype = "2-tray-companion",
             Func<TerminalLogBufferService?>? getLogBuffer = null)
         {
@@ -55,7 +55,7 @@ namespace Housekeeping.Services
                 _logBufferProvider = getLogBuffer;
                 if (!string.IsNullOrWhiteSpace(buildVersion))
                     _buildVersion = buildVersion.Trim();
-                _testMode = testMode;
+                _isolatedMode = isolatedMode;
                 if (!string.IsNullOrWhiteSpace(archetype))
                     _archetype = archetype.Trim();
 
@@ -111,7 +111,7 @@ namespace Housekeeping.Services
             Exception ex,
             string? logsDirOverride = null,
             string? buildVersionOverride = null,
-            bool? testModeOverride = null,
+            bool? isolatedModeOverride = null,
             string? archetypeOverride = null,
             TerminalLogBufferService? logBufferOverride = null)
         {
@@ -131,7 +131,7 @@ namespace Housekeeping.Services
                     if (string.IsNullOrWhiteSpace(version))
                         version = CrashBundleExceptionFilter.DefaultFallbackVersion;
 
-                    bool isTestMode = testModeOverride ?? _testMode;
+                    bool isIsolated = isolatedModeOverride ?? _isolatedMode;
                     string archetype = !string.IsNullOrWhiteSpace(archetypeOverride)
                         ? archetypeOverride!.Trim()
                         : _archetype;
@@ -166,7 +166,7 @@ namespace Housekeeping.Services
                         AppName = "Housekeeping",
                         BuildVersion = version,
                         Archetype = archetype,
-                        TestMode = isTestMode,
+                        IsolatedMode = isIsolated,
                         Process = new CrashProcessInfoDto
                         {
                             Pid = Environment.ProcessId,

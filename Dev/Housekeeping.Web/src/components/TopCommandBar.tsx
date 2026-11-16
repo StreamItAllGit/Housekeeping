@@ -183,7 +183,7 @@ export const TopCommandBar: React.FC = () => {
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-  const versionNumber = (authStatus?.version || '0.1.12').replace(/^v/i, '');
+  const versionNumber = (authStatus?.version || '0.1.12-hf.1').replace(/^v/i, '');
 
   const openWebSettingsSubtab = () => {
     try {

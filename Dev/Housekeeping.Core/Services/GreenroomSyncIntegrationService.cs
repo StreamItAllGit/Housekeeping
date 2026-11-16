@@ -110,7 +110,7 @@ namespace Housekeeping.Services
                 candidates.Add(Path.Combine(envRoot.Trim(), "scripts", "run_greenroom.bat"));
             }
 
-            if (!_configService.IsTestMode)
+            if (!_configService.IsIsolatedOverride)
             {
                 string siblingGreenroom = Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "Greenroom"));
                 candidates.Add(Path.Combine(siblingGreenroom, "scripts", "run_greenroom.bat"));

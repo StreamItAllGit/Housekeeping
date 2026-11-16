@@ -19,7 +19,7 @@ namespace Housekeeping.DesktopHost
         public string? CustomDataDirectory { get; set; }
         public string? CustomConfigFilePath { get; set; }
         public string? CustomLogsDirectory { get; set; }
-        public bool TestMode { get; set; }
+        public bool IsolatedOverride { get; set; }
         public bool DryRun { get; set; }
         public bool ManagedByMother { get; set; }
     }
@@ -56,7 +56,7 @@ namespace Housekeeping.DesktopHost
                 startBackgroundTimers: true,
                 customConfigFilePath: launchOptions.CustomConfigFilePath,
                 customLogsDirectory: launchOptions.CustomLogsDirectory,
-                isTestMode: launchOptions.TestMode,
+                isolatedOverride: launchOptions.IsolatedOverride,
                 forceDryRun: launchOptions.DryRun);
 
             int configuredPort = launchOptions.PortOverride ?? _runtime.ConfigService.Config.WebServer.Port;
@@ -70,7 +70,7 @@ namespace Housekeeping.DesktopHost
                 CustomDataDirectory = launchOptions.CustomDataDirectory,
                 CustomConfigFilePath = launchOptions.CustomConfigFilePath,
                 CustomLogsDirectory = launchOptions.CustomLogsDirectory,
-                TestMode = launchOptions.TestMode,
+                IsolatedOverride = launchOptions.IsolatedOverride,
                 DryRun = launchOptions.DryRun,
                 NativeDialogBridge = _dialogBridge,
                 StartBackgroundTimers = true

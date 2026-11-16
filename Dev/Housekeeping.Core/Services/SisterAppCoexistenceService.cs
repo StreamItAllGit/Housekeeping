@@ -55,7 +55,7 @@ namespace Housekeeping.Services
             status.ManagedRoots = roots;
 
             var peerMap = new Dictionary<string, CoexistencePeerSummaryDto>(StringComparer.OrdinalIgnoreCase);
-            if (!_configService.IsTestMode)
+            if (!_configService.IsIsolatedOverride)
             {
                 var tasks = KnownPeers.Select(p => ProbePeerHttpAsync(p.AppId, p.Name, ResolvePeerPort(cfg, p.AppId, p.DefaultPort), p.ProcessName, ct));
                 foreach (var peer in await Task.WhenAll(tasks).ConfigureAwait(false))

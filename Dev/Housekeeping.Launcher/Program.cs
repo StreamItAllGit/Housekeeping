@@ -102,8 +102,6 @@ internal static class Program
                 a.Equals("help", StringComparison.OrdinalIgnoreCase) ||
                 a.Equals("--status", StringComparison.OrdinalIgnoreCase) ||
                 a.Equals("--repair-config", StringComparison.OrdinalIgnoreCase) ||
-                a.Equals("--headless", StringComparison.OrdinalIgnoreCase) ||
-                a.Equals("--test-mode", StringComparison.OrdinalIgnoreCase) ||
                 a.Equals("--dry-run", StringComparison.OrdinalIgnoreCase))
             {
                 return true;

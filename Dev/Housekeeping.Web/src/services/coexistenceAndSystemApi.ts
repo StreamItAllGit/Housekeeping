@@ -1,5 +1,5 @@
 // @module: Housekeeping.Web/services/coexistenceAndSystemApi
-// @purpose: Extracted API helpers for 3-tier stop control, sister-app coexistence, fleet nodes, Greenroom, Tailscale PWA, and System Doctor.
+// @purpose: Extracted API helpers for dual-mode stop control, sister-app coexistence, fleet nodes, Greenroom, Tailscale PWA, and System Doctor.
 // @depends-on: ../types/models
 // @exports: createCoexistenceAndSystemApi, RequestJsonFn
 import type {
@@ -21,7 +21,7 @@ export type RequestJsonFn = <T>(
 
 export function createCoexistenceAndSystemApi(requestJson: RequestJsonFn) {
   return {
-    // 3-Tier Stop Controls (Stop Current Job vs Stop Entire Queue)
+    // Dual-Mode Stop Controls (Stop Current Job vs Stop Entire Queue)
     stopCurrentJob: () =>
       requestJson<{ ok: boolean; stoppedJob: boolean; state: PipelineRuntimeStateDto }>(
         '/pipeline/stop-job',
@@ -129,8 +129,7 @@ export function createCoexistenceAndSystemApi(requestJson: RequestJsonFn) {
         appVersion: string;
         machineName: string;
         osVersion: string;
-        isTestMode: boolean;
-        isSandboxed: boolean;
+        isIsolated: boolean;
         dependencies: DependencyStatusItem[];
         drives: Array<{
           name: string;

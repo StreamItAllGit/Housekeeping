@@ -1417,7 +1417,7 @@ namespace Housekeeping.Services
                 if (!launchedChained)
                 {
                     string postAction = _configService.Config.PostRunPowerAction;
-                    if (!isDryRun && !_configService.IsTestMode && runStatus != "Cancelled" &&
+                    if (!isDryRun && !_configService.IsIsolatedOverride && runStatus != "Cancelled" &&
                         (string.Equals(postAction, "Sleep", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(postAction, "Shutdown", StringComparison.OrdinalIgnoreCase)))
                     {

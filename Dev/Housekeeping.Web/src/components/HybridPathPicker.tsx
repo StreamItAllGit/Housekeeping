@@ -16,7 +16,7 @@ interface HybridPathPickerProps {
 /**
  * Hybrid Dual-Mode Path Picker (Decision 4):
  * - On localhost with Desktop Tray Host active: 1-click Native Windows OS Dialog + optional Server/UNC Explorer Modal.
- * - Over LAN / Tailnet / Mobile / Headless: opens the Server Drive & UNC Explorer Modal directly.
+ * - Over LAN / Tailnet / Mobile: opens the Server Drive & UNC Explorer Modal directly.
  */
 export const HybridPathPicker: React.FC<HybridPathPickerProps> = ({
   value,

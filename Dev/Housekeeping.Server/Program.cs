@@ -49,7 +49,7 @@ string initialLogsDir = !string.IsNullOrWhiteSpace(cli.CustomLogsDirectory)
 CrashBundleService.RegisterGlobalHandlers(
     () => initialLogsDir,
     RemoteNodeDeploymentService.GetLocalAppVersion(),
-    cli.TestMode,
+    cli.IsIsolatedInvocation,
     archetype: "2-tray-companion");
 
 var options = new HousekeepingServerOptions
@@ -59,7 +59,7 @@ var options = new HousekeepingServerOptions
     CustomDataDirectory = cli.CustomDataDirectory,
     CustomConfigFilePath = cli.CustomConfigFilePath,
     CustomLogsDirectory = cli.CustomLogsDirectory,
-    TestMode = cli.TestMode,
+    IsolatedOverride = cli.IsIsolatedInvocation,
     DryRun = cli.DryRun
 };
 

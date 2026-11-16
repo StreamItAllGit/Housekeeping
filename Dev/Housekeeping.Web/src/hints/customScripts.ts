@@ -20,7 +20,7 @@ export const CUSTOM_SCRIPTS_HINTS = {
   thReqPath:
     'Optional drive or UNC path verified before running this task.\nPauses for network recovery if Network Drop Safety is enabled.',
   thExtCmd:
-    'Runs the task in an interactive external CMD window instead of headless capture.\nOnly applies on local interactive Windows sessions.',
+    'Runs the task in an interactive external CMD window instead of background capture.\nOnly applies on local interactive Windows sessions.',
   thDelete:
     'Removes this task step from the job pipeline.\nUse Ctrl+Z or Snapshot History to undo.',
 } as const;

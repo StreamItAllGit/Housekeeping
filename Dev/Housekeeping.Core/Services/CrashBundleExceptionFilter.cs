@@ -19,7 +19,7 @@ namespace Housekeeping.Services
         [JsonPropertyName("app_name")] public string AppName { get; set; } = "Housekeeping";
         [JsonPropertyName("build_version")] public string BuildVersion { get; set; } = "";
         [JsonPropertyName("archetype")] public string Archetype { get; set; } = "2-tray-companion";
-        [JsonPropertyName("test_mode")] public bool TestMode { get; set; }
+        [JsonPropertyName("isolated_mode")] public bool IsolatedMode { get; set; }
         [JsonPropertyName("process")] public CrashProcessInfoDto Process { get; set; } = new();
         [JsonPropertyName("exception")] public CrashExceptionInfoDto Exception { get; set; } = new();
         [JsonPropertyName("preceding_log_ring_buffer")] public List<string> PrecedingLogRingBuffer { get; set; } = new();
@@ -44,7 +44,7 @@ namespace Housekeeping.Services
 
     public static class CrashBundleExceptionFilter
     {
-        public const string DefaultFallbackVersion = "0.1.12";
+        public const string DefaultFallbackVersion = "0.1.12-hf.1";
 
         public static bool IsBenignBackgroundException(Exception? ex)
         {

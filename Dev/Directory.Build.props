@@ -2,10 +2,10 @@
 
   <PropertyGroup>
     <Product>Housekeeping</Product>
-    <Version>0.1.12</Version>
-    <InformationalVersion>0.1.12</InformationalVersion>
+    <Version>0.1.12-hf.1</Version>
+    <InformationalVersion>0.1.12-hf.1</InformationalVersion>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>0.1.12.0</FileVersion>
+    <FileVersion>0.1.12.1</FileVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild Condition="'$(Configuration)' == 'Release'">true</ContinuousIntegrationBuild>
     <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>

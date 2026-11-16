@@ -11,10 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.12-hf.1] - 2026-11-15
+
+### Changed
+- **Isolated Runtime & Tray Alignment**:
+  - Migrated test/isolation/presentation paths to standard `--data-dir`, `--config`, `--log-dir`, `--port`, `--tray-only` (`UiPresentationMode.TrayOrBackground`), and `APP_ISOLATED_TEST=1`.
+  - Standardized Tier A 5-folder container layout (`Archive\`, `Builds\`, `Dev\`, `Installers\`, `Releases\`) across `active.state`, `.gitignore`, `AGENTS.md`, Root Quartet, Manual Shelf, and archived plans/reports, and aligned `verify_ui_hints.mjs` & `build_installer.ps1` cleanly.
+
+### Removed
+- **Legacy Harness & Mock Scaffolding**:
+  - Removed legacy harness directories, standalone walkthrough reports, alternate test port bifurcation, synthetic uninstall/shortcut mocks, and viewport probe scaffolding while passing all `183/183` Release xUnit tests under `APP_ISOLATED_TEST=1`.
+
+---
+
 ## [0.1.12] - 2026-11-11
 
 ### Added
-- **Three-Tier Execution & Graceful Shutdown Control (`PipelineOrchestratorService.CancellationAndShutdown.cs`, `HousekeepingApiEndpoints.CoexistenceAndControl.cs`, `TrayMenuFactory.cs`, `ActivePipelineControlBar.tsx`)**:
+- **Dual-Mode Stop & Graceful Shutdown Control (`PipelineOrchestratorService.CancellationAndShutdown.cs`, `HousekeepingApiEndpoints.CoexistenceAndControl.cs`, `TrayMenuFactory.cs`, `ActivePipelineControlBar.tsx`)**:
   - Separated `StopCurrentJob()` (`POST /api/v1/pipeline/stop-job`, linked per-job `_activeJobCts` advancing the active queue while preserving `PendingRuns`), `StopActiveRun()` (`POST /api/v1/pipeline/stop-queue`, explicit user stop clearing `PendingRuns` and checkpoint), and `InitiateGracefulShutdownAbort()` (invoked by `POST /api/v1/system/shutdown`, `TrayDaemonApplicationContext.ShutdownAndExit()`, and `Dispose()`, preserving `interrupted_run_checkpoint.json` and `PendingRuns` across upgrades/reboots).
   - Split Web UI (`TopCommandBar.tsx`, `ActivePipelineControlBar.tsx`) and System Tray (`TrayMenuFactory.cs`) controls into distinct **Stop Job** and **Stop Queue** actions.
 - **4-Pillar Sister-App Coexistence Bridge & Standard 19 `.hklock` Coordination (`SisterAppCoexistenceService.cs`, `NetworkSafetyService.DirectoryLocks.cs`, `CoexistenceWarningBanner.tsx`, `SettingsIntegrationsAndDoctorCard.tsx`)**:
@@ -133,7 +146,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0-rc.10-nightly.1] - 2026-11-02
 
 ### Added
-- **Root Documentation Quartet & 6-Folder `Releases\` Distribution Architecture (`README.md`, `FEATURES.md`, `ROADMAP.md`, `CHANGELOG.md`, `Releases\`, `Dev\scripts\build_installer.ps1`)**:
+- **Root Documentation Quartet & 5-Folder `Releases\` Distribution Architecture (`README.md`, `FEATURES.md`, `ROADMAP.md`, `CHANGELOG.md`, `Releases\`, `Dev\scripts\build_installer.ps1`)**:
   - Migrated `README.md` and `CHANGELOG.md` from `Dev\` to the outer project root (`D:\Projects\Personal\Housekeeping\`) and authored root `FEATURES.md` and `ROADMAP.md` per Dev Bible Standard 16.
   - Added `Releases\` 6-file distribution bundle packaging (`Housekeeping-Setup-v1.0.0-rc.10-nightly.1-win-x64.exe`, stripped end-user `README.md` & `FEATURES.md`, `RELEASE_NOTES.md`, `CHANGELOG.md`, `SHA256SUMS.txt` in `Releases\Latest\`, `Releases\Latest.7z`, and `Releases\v1.0.0-rc.10-nightly.1.7z`) and automatic central installer mirroring to `D:\Projects\Installers\`.
 - **Standard 15 Structured Disk Log Grammar, `10 MB × 5` Log Rotation & 30-Day Run Log Retention (`TerminalLogBufferService.cs`, `CrashBundleService.cs`)**:
@@ -179,8 +192,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Orphaned `rclone bisync` Lock File Protection & Auto-Recovery (`CloudAndHumbleSyncModules.cs`, `AppConfig.cs`)**:
   - Appended bounded `--max-lock 2h` by default to `rclone bisync` executions in `CloudSyncModule` (whenever custom flags do not already specify `--max-lock`) and generated emulator save-sync `bisync` commands in `RomLauncherConfig`, preventing killed/interrupted `bisync` runs from creating non-expiring `.lck` files.
   - Added orphaned `bisync` `.lck` detection and safe single-retry auto-recovery in `CloudSyncModule`: when `rclone bisync` exits non-zero reporting `prior lock file found: ...bisync...lck` and zero `rclone` processes are currently active on the host, `CloudSyncModule` removes the stale `.lck` file, logs a `[WARN]` notice, and retries the `bisync` job once.
-- **Sandbox Container Preservation on `--uninstall --purge-data --test-mode` (`Housekeeping.Installer\Program.cs`)**:
-  - Guarded empty directory deletion at the end of `RunUninstall` with `!testMode` so `--uninstall --purge-data --test-mode` empties all installed files inside `Sandbox\app` without deleting the required `Sandbox\app` directory container itself.
+- **Empty Install Root Cleanup on `--uninstall --purge-data` (`Housekeeping.Installer\Program.cs`)**:
+  - Standardized uninstall cleanup so `--uninstall --purge-data` empties installed application artifacts while preserving explicit isolated test root containers during automated runs (`APP_ISOLATED_TEST=1`).
 - **8-Digit `YYYYMMDD` Nightly Windows PE `FileVersion` Mapping (`Dev\scripts\build_installer.ps1`, `RemoteNodeDeploymentService.cs`)**:
   - Updated `build_installer.ps1` to map 8-digit `-nightly.YYYYMMDD` pre-release stamps to 4-digit `MMDD` (`<= 65534`) for Windows PE `/p:FileVersion` while preserving full SemVer `<X.Y.Z>-nightly.<YYYYMMDD>` in `Version`, `InformationalVersion`, and embedded installer metadata, and upgraded `CompareSemVer` numeric pre-release parsing to 64-bit `long`.
 
@@ -194,7 +207,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Enabled manual **`⏭ Queue Next`** queueing while a pipeline run, compliance scan, or `.hash` verifier task is active across the Top Command Bar, Dashboard, Named Job Queues, Job Builder, and System Tray—while rejecting duplicate or currently running targets (`HTTP 409 Conflict` / toast notification) so no queue or job is ever queued infinitely or consecutively.
   - Added live `"Up Next"` queue visibility on the Dashboard with per-item cancel (`✕`) and **`🗑 Clear Queued`** controls.
 - **4-Pillar Self-Contained Single-EXE Windows Installer (`Housekeeping.Installer`, `Dev\scripts\build_installer.ps1`)**:
-  - Added native `.NET 8` (`win-x64`) single-file self-contained installer (`Housekeeping-Setup-v<Version>-win-x64.exe`) embedding the compiled payload archive, cryptographically Authenticode-signed (`CN=StreamItAll Code Signing`), 100% free of PII/secrets/developer build paths, preserving canonical user state (`settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, `backups\`, `logs\`, `tools\`) across upgrades/uninstalls, and supporting `--test-mode`, `--verify`, `--dry-run`, `--install-dir`, `--data-dir`, `--log-dir`, `--uninstall`, and `--purge-data`.
+  - Added native `.NET 8` (`win-x64`) single-file self-contained installer (`Housekeeping-Setup-v<Version>-win-x64.exe`) embedding the compiled payload archive, cryptographically Authenticode-signed (`CN=StreamItAll Code Signing`), 100% free of PII/secrets/developer build paths, preserving canonical user state (`settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `dats\`, `backups\`, `logs\`, `tools\`) across upgrades/uninstalls, and supporting `--verify`, `--dry-run`, `--install-dir`, `--data-dir`, `--log-dir`, `--uninstall`, and `--purge-data`.
 
 ### Fixed
 - **DST Fall-Back Ambiguous Local-Time Infinite 15-Second Re-Trigger Bug (`SchedulerAndNotificationService.cs`, `PipelineOrchestratorService.cs`)**:
@@ -208,18 +221,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.0-rc.8] - 2026-11-01
 
 ### Changed
-- **Canonical 5-Folder Project Hierarchy Migration (`Archive\`, `Builds\`, `Dev\`, `Installers\`, `Sandbox\`)**:
-  - Migrated the workspace from its legacy flat layout into the clean 5-folder container hierarchy (`zero` loose outer files), archiving pre-migration and legacy snapshots in `Archive\`, relocating active source/tests/docs into `Dev\`, isolating `Sandbox\{app,data,logs}` as a sibling to `Dev\`, and staging versioned release binaries in `Builds\v1.0.0-rc.8\`.
+- **Canonical Tier A Project Hierarchy Migration (`Archive\`, `Builds\`, `Dev\`, `Installers\`, `Releases\`)**:
+  - Migrated the workspace from its legacy flat layout into the clean canonical Tier A container hierarchy (`zero` loose outer files), archiving pre-migration and legacy snapshots in `Archive\`, relocating active source/tests/docs into `Dev\`, and staging versioned release binaries in `Builds\v1.0.0-rc.8\`.
 - **Full Manifest Synchronization & Production RC8 Cutover (`Directory.Build.props`, `version.txt`, `package.json`, `package-lock.json`)**:
-  - Synchronized all backend and frontend manifests in lockstep to `1.0.0-rc.8`, verified `141 / 141` xUnit tests under `/warnaserror` (`0` warnings) and `0` binary PII/path leaks, re-verified contained live execution in `Sandbox\`, and deployed `1.0.0-rc.8` binaries + PWA assets to canonical production with atomic pre-deploy backup.
+  - Synchronized all backend and frontend manifests in lockstep to `1.0.0-rc.8`, verified `141 / 141` xUnit tests under `/warnaserror` (`0` warnings) and `0` binary PII/path leaks, re-verified contained execution via isolated directory overrides, and deployed `1.0.0-rc.8` binaries + PWA assets to canonical production with atomic pre-deploy backup.
 
 ---
 
 ## [1.0.0-rc.7] - 2026-10-31
 
 ### Added
-- **Unified Sandbox-by-Design CLI Parser, `--help`/`--version`, & Deterministic Anonymized Builds (`HousekeepingCliParser.cs`, `Directory.Build.props`, `README.md`, `MODULES_REFERENCE.md`)**:
-  - Added `HousekeepingCliParser` across `Housekeeping.exe` (`AttachConsole` stdout support) and `Housekeeping.Server`, exposing `--data-dir`, `--config`, `--log-dir`, `--port`, `--localhost-only`, `--headless`, `--test-mode`, `--dry-run`, `--minimized`/`--silent`, `--watchdog`, `--version`/`-v`, and `--help`/`-h`/`/?`, plus environment variable fallbacks (`HOUSEKEEPING_DATA_DIR`, `DATA_DIR`, `HOUSEKEEPING_HOME`, `APP_HOME`, `HOUSEKEEPING_CONFIG`, `CONFIG_PATH`, `HOUSEKEEPING_LOG_DIR`, `LOG_DIR`, `HOUSEKEEPING_PORT`, `PORT`, `HOUSEKEEPING_TEST_MODE`, `TEST_MODE`, `HOUSEKEEPING_DRY_RUN`, `DRY_RUN`).
+- **Unified CLI Parser, `--help`/`--version`, & Deterministic Anonymized Builds (`HousekeepingCliParser.cs`, `Directory.Build.props`, `README.md`, `MODULES_REFERENCE.md`)**:
+  - Added `HousekeepingCliParser` across `Housekeeping.exe` (`AttachConsole` stdout support) and `Housekeeping.Server`, exposing `--data-dir`, `--config`, `--log-dir`, `--port`, `--localhost-only`, `--tray-only`, `--dry-run`, `--minimized`/`--silent`, `--watchdog`, `--version`/`-v`, and `--help`/`-h`/`/?`, plus environment variable fallbacks (`HOUSEKEEPING_DATA_DIR`, `DATA_DIR`, `HOUSEKEEPING_HOME`, `APP_HOME`, `HOUSEKEEPING_CONFIG`, `CONFIG_PATH`, `HOUSEKEEPING_LOG_DIR`, `LOG_DIR`, `HOUSEKEEPING_PORT`, `PORT`, `HOUSEKEEPING_DRY_RUN`, `DRY_RUN`).
   - Added solution-wide `Directory.Build.props` unifying `<Version>1.0.0-rc.7</Version>`, `<Deterministic>true</Deterministic>`, `<ContinuousIntegrationBuild>` in Release, and `<PathMap>` source-path anonymization to eliminate loose `.pdb` sidecars and strip local developer build paths from Release binaries.
   - Authored comprehensive [`README.md`](README.md) matching `--help` 1:1 and updated [`MODULES_REFERENCE.md`](MODULES_REFERENCE.md) for the `.NET 8 Kestrel + React 19 PWA` architecture and all 8 modules (including Module 8 `Collection Manifest Auditor` and 9-column `CRC32`+`SHA-1` compliance workflows).
 
@@ -234,10 +247,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Node-Scoped SignalR Real-Time Groups (`HousekeepingHub.cs`, `RealtimeBroadcastHostedService.cs`)**:
   - Enrolled SignalR hub connections into node-scoped groups (`node:local` vs `node:<targetNodeId>`, plus dynamic `SubscribeToNode(nodeId)`) and scoped local telemetry/pipeline/log broadcasts exclusively to `node:local`, preventing local host `2s` ticks from overwriting remote Target Node workspace state while relaying live `2s` remote node status to active remote subscribers.
-- **Strict `--data-dir`, `--config`, `--log-dir`, `--test-mode`, `--dry-run` Containment & Zero Hardcoded Host Paths (`ConfigService.cs`, `AppConfig.cs`, `GreenroomSyncIntegrationService.cs`, `PipelineOrchestratorService.cs`, `HousekeepingApiEndpoints.cs`, `SystemPerformanceTelemetryService.cs`, `CollectionManifestModule.cs`, `RomLauncherGeneratorModule.cs`, `Program.cs`, `DisposableWebViewForm.cs`, `TrayDaemonApplicationContext.cs`)**:
-  - Removed hardcoded local host `Greenroom` root defaults in favor of dynamic `GreenroomRootPath` / `GREENROOM_ROOT` / relative sibling resolution (scoped inside `DataDirectory` in `--test-mode`).
-  - Added `--test-mode` host-isolation guards suppressing Windows Registry startup mutations, Task Scheduler `schtasks.exe` writes, Tailscale Serve mutations, and post-run OS sleep/shutdown actions (`simulated: true`), plus `PipelineOrchestratorService.ForceDryRun` (`--dry-run`) forcing all pipeline dispatches to `IsDryRun = true`.
-  - Routed `telemetry_heartbeat.json` exclusively to `ConfigService.ActiveLogsDir`, scoped default `tools/README_TOOLS.txt`, `dats`, `compliance_reports.json`, WebView2 user-data caches, and named single-instance mutexes under sandbox directories when sandbox flags are active (guaranteeing `0` writes into `AppDomain.CurrentDomain.BaseDirectory`).
+- **Strict `--data-dir`, `--config`, `--log-dir`, `--dry-run` Containment & Zero Hardcoded Host Paths (`ConfigService.cs`, `AppConfig.cs`, `GreenroomSyncIntegrationService.cs`, `PipelineOrchestratorService.cs`, `HousekeepingApiEndpoints.cs`, `SystemPerformanceTelemetryService.cs`, `CollectionManifestModule.cs`, `RomLauncherGeneratorModule.cs`, `Program.cs`, `DisposableWebViewForm.cs`, `TrayDaemonApplicationContext.cs`)**:
+  - Removed hardcoded local host `Greenroom` root defaults in favor of dynamic `GreenroomRootPath` / `GREENROOM_ROOT` / relative sibling resolution (scoped inside `DataDirectory` during `APP_ISOLATED_TEST=1` test runs).
+  - Added `APP_ISOLATED_TEST=1` host-isolation guards suppressing Windows Registry startup mutations, Task Scheduler `schtasks.exe` writes, Tailscale Serve mutations, and post-run OS sleep/shutdown actions (`simulated: true`), plus `PipelineOrchestratorService.ForceDryRun` (`--dry-run`) forcing all pipeline dispatches to `IsDryRun = true`.
+  - Routed `telemetry_heartbeat.json` exclusively to `ConfigService.ActiveLogsDir`, scoped default `tools/README_TOOLS.txt`, `dats`, `compliance_reports.json`, WebView2 user-data caches, and named single-instance mutexes under explicit `--data-dir`/`--log-dir` overrides (guaranteeing `0` writes into `AppDomain.CurrentDomain.BaseDirectory`).
 - **Module 8 Per-Module Custom Schedule Evaluation & `IsDryRun` Non-Destructive Parity (`SchedulerAndNotificationService.cs`, `CollectionManifestModule.cs`)**:
   - Added `CheckModule(ModuleId.CollectionManifest, cfg.CollectionManifest, now, due)` to `GetPerModuleSchedulesDueNow()` so custom per-module schedules on Module 8 (`Collection Manifest Auditor`) evaluate alongside Modules 1–7.
   - Added strict `ctx.IsDryRun` guards in `CollectionManifestModule.ExecuteAsync` so dry-run executions perform full file discovery and cryptographic audit simulation while suppressing online DAT downloads, `.hash` sidecar writes/7z injections, CSV/JSON/HTML manifest overwrites, and secondary mirror copies.
@@ -344,7 +357,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Four-Project Always-On Engine + Dual-Mode Web/Desktop Architecture (`Housekeeping.Core`, `Housekeeping.Server`, `Housekeeping.Web`, `Housekeeping.DesktopHost`)**:
   - Decoupled all 8 automation modules, 3-topology hashing (`SingleFileRom`, `MultiFileRomSet`, `CompositeFolderDump`), Fast 7z Header `CRC32` + `SHA-1` verification, Redump/No-Intro DAT correlation, Archive Structure Compliance Templates, guarded `7z d` extra-file cleanup, atomic pending swaps, and network-drop safety into pure, UI-free **`Housekeeping.Core`** (`net8.0-windows`).
   - Added **`Housekeeping.Server`** (`ASP.NET Core Kestrel` + `SignalR` `/hubs/housekeeping`, default `0.0.0.0:5178`) serving 12 `/api/v1/*` REST endpoint groups and real-time coalesced SignalR streams (`50 ms` terminal log batches, `100 ms` subprocess progress, `2 s` telemetry/drives/global-next-run, pipeline state transitions, and compliance KPI updates).
-  - Added **`Housekeeping.DesktopHost`** (`Housekeeping.exe`), a single-executable Windows System Tray daemon hosting Kestrel in-process in the user logon session (preserving mapped NAS drives `V:\`–`Z:\` and `WindowsWatchdogService` Task Scheduler compatibility) with **Dual UI Launch Modes**: open in any **Browser (`http://localhost:5178`)** or launch a native dark-titlebar **`DisposableWebViewForm` (`WebView2`)** whose close button (`X`) disposes `WebView2` completely (freeing 100% of `msedgewebview2.exe` Chromium memory to `0 MB`) while the background engine keeps running until explicitly shut down from the System Tray (`⏻ Shut Down Housekeeping Engine`). Supports `--minimized`, `--watchdog`, `--headless`, `--port`, `--data-dir`, and `--localhost-only`.
+  - Added **`Housekeeping.DesktopHost`** (`Housekeeping.exe`), a single-executable Windows System Tray daemon hosting Kestrel in-process in the user logon session (preserving mapped NAS drives `V:\`–`Z:\` and `WindowsWatchdogService` Task Scheduler compatibility) with **Dual UI Launch Modes**: open in any **Browser (`http://localhost:5178`)** or launch a native dark-titlebar **`DisposableWebViewForm` (`WebView2`)** whose close button (`X`) disposes `WebView2` completely (freeing 100% of `msedgewebview2.exe` Chromium memory to `0 MB`) while the background engine keeps running until explicitly shut down from the System Tray (`⏻ Shut Down Housekeeping Engine`). Supports `--minimized`, `--watchdog`, `--tray-only`, `--port`, `--data-dir`, and `--localhost-only`.
 - **Tiered Loopback / LAN / Tailnet Authentication & Raw Shell Governance (`TieredAuthService.cs`, `TieredAuthMiddleware.cs`)**:
   - Zero-friction auto-trust on direct `127.0.0.1` / `::1` loopback connections, optional `Tailscale-User-Login` identity header trust for `tailscale serve` loopback proxies, PBKDF2-SHA256 admin password setup/login with 30-day HMAC-SHA256 signed `HttpOnly; SameSite=Lax` `hk_session` cookies for LAN/Tailnet/Remote browsers, `X-Housekeeping-Token` / Bearer fleet API authentication, and an opt-in `RestrictRawShellToLocalhost` security boundary blocking remote `/api/v1/terminal/exec` and `CustomScripts` modifications (`403 Forbidden`).
 - **Unified Top-Bar Multi-Node Fleet Proxy (`RemoteNodeProxyMiddleware.cs`, `TopCommandBar.tsx`)**:

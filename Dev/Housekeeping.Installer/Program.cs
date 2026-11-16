@@ -93,9 +93,7 @@ public static partial class Program
     public static int Main(string[] args)
     {
         bool hasCliArgs = args != null && args.Length > 0;
-        if (hasCliArgs ||
-            IsTruthy(Env("HOUSEKEEPING_TEST_MODE")) ||
-            IsTruthy(Env("HOUSEKEEPING_HEADLESS")))
+        if (hasCliArgs)
         {
             try
             {
@@ -136,10 +134,9 @@ public static partial class Program
         string? dataDir = FirstNonEmpty(opts.DataDir, Env("HOUSEKEEPING_DATA_DIR"), Env("DATA_DIR"), Env("APP_HOME"));
         string? logDir = FirstNonEmpty(opts.LogDir, Env("HOUSEKEEPING_LOG_DIR"), Env("LOG_DIR"));
         string? cfgPath = FirstNonEmpty(opts.ConfigPath, Env("HOUSEKEEPING_CONFIG_FILE"), Env("CONFIG_PATH"), Env("CONFIG_FILE"));
-        bool testMode = opts.TestMode || IsTruthy(Env("HOUSEKEEPING_TEST_MODE"));
-        bool headless = opts.Headless || IsTruthy(Env("HOUSEKEEPING_HEADLESS"));
+        bool isolatedMode = !string.IsNullOrWhiteSpace(dataDir) || IsTruthy(Env("APP_ISOLATED_TEST"));
         bool dryRun = opts.DryRun || IsTruthy(Env("HOUSEKEEPING_DRY_RUN"));
-        bool silent = opts.Silent || headless || testMode;
+        bool silent = opts.Silent;
 
         if (!string.IsNullOrWhiteSpace(cfgPath) && File.Exists(cfgPath))
         {
@@ -167,22 +164,17 @@ public static partial class Program
 
         try
         {
-            if (testMode && string.IsNullOrWhiteSpace(dataDir))
-            {
-                throw new InvalidOperationException("Fail-closed sandbox violation: --test-mode requires --data-dir (or DATA_DIR / APP_HOME).");
-            }
-
             // Launch the Dark WinForms GUI Setup Wizard when invoked interactively without CLI flags
-            if (!hasCliArgs && !silent && !testMode && !headless && !dryRun && !opts.VerifyOnly)
+            if (!hasCliArgs && !silent && !isolatedMode && !dryRun && !opts.VerifyOnly)
             {
-                string defaultGuiDir = ResolveInstallDirectory(opts.InstallDir, dataDir, testMode: false, silent: true, dryRun: false);
+                string defaultGuiDir = ResolveInstallDirectory(opts.InstallDir, dataDir, isolatedMode: false, silent: true, dryRun: false);
                 ApplicationConfiguration.Initialize();
                 using var wizard = new InstallerWizardForm(
                     meta: meta,
                     initialInstallDir: defaultGuiDir,
                     dataDir: dataDir,
                     logDir: logDir,
-                    testMode: false,
+                    isolatedMode: false,
                     isUninstallMode: opts.Uninstall,
                     initialCreateShortcuts: !opts.NoShortcuts);
                 Application.Run(wizard);
@@ -202,23 +194,23 @@ public static partial class Program
                 return 0;
             }
 
-            string installDir = ResolveInstallDirectory(opts.InstallDir, dataDir, testMode, silent, dryRun);
-            ValidateContainment(installDir, dataDir, logDir, testMode);
+            string installDir = ResolveInstallDirectory(opts.InstallDir, dataDir, isolatedMode, silent, dryRun);
+            ValidateContainment(installDir, dataDir, logDir, isolatedMode);
 
             if (opts.Uninstall)
             {
-                return RunUninstall(installDir, dataDir, logDir, testMode, dryRun, opts.PurgeData, meta);
+                return RunUninstall(installDir, dataDir, logDir, isolatedMode, dryRun, opts.PurgeData, meta);
             }
 
             return RunInstall(
                 installDir,
                 dataDir,
                 logDir,
-                testMode,
+                isolatedMode,
                 dryRun,
                 !opts.NoShortcuts,
                 meta,
-                autoRelaunchIfRunning: !testMode && !opts.NoLaunch,
+                autoRelaunchIfRunning: !isolatedMode && !opts.NoLaunch,
                 forceLaunch: opts.LaunchAfter);
         }
         catch (Exception ex)
@@ -511,7 +503,7 @@ public static partial class Program
         string installDir,
         string? dataDir,
         string? logDir,
-        bool testMode,
+        bool isolatedMode,
         bool dryRun,
         bool createShortcuts,
         EmbeddedMetadata meta,
@@ -667,7 +659,7 @@ public static partial class Program
             ["payload_sha256"] = verifiedSha,
             ["installed_files"] = extractedFiles,
             ["installed_at_utc"] = DateTime.UtcNow.ToString("O"),
-            ["test_mode"] = testMode,
+            ["isolated"] = isolatedMode,
             ["files"] = installedRelPaths
         };
         File.WriteAllText(activeReceiptPath, JsonSerializer.Serialize(receipt, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
@@ -698,20 +690,20 @@ public static partial class Program
 
         if (createShortcuts)
         {
-            CreateShortcuts(installDir, dataDir, testMode);
+            CreateShortcuts(installDir, isolatedMode);
         }
 
-        RegisterUninstaller(installDir, uninstallerPath, dataDir, testMode, meta);
+        RegisterUninstaller(installDir, uninstallerPath, isolatedMode, meta);
 
         // Final sweep to ensure all user state lives inside data\ and outer root is 100% clean
         MigrateLegacyUserState(installDir, logDir);
         CleanupObsoleteInstallationFiles(installDir, null, logDir);
 
         string actionVerb = isUpgrade ? "Upgraded" : "Installed";
-        WriteLog(logDir, "INFO", $"{actionVerb} {meta.AppName} v{meta.Version} ({extractedFiles} files) to {installDir} (prior={priorVersion ?? "none"}, test_mode={testMode}).");
+        WriteLog(logDir, "INFO", $"{actionVerb} {meta.AppName} v{meta.Version} ({extractedFiles} files) to {installDir} (prior={priorVersion ?? "none"}, isolated={isolatedMode}).");
         Console.WriteLine($"{actionVerb} {meta.AppName} v{meta.Version} ({extractedFiles} files) -> {installDir}");
 
-        if ((forceLaunch || (wasRunning && autoRelaunchIfRunning)) && !testMode && !dryRun)
+        if ((forceLaunch || (wasRunning && autoRelaunchIfRunning)) && !isolatedMode && !dryRun)
         {
             TryLaunchInstalledHousekeeping(installDir, logDir);
         }
@@ -723,7 +715,7 @@ public static partial class Program
         string installDir,
         string? dataDir,
         string? logDir,
-        bool testMode,
+        bool isolatedMode,
         bool dryRun,
         bool purgeData,
         EmbeddedMetadata meta)
@@ -736,8 +728,8 @@ public static partial class Program
         }
 
         StopRunningProcessesInDirectory(installDir, logDir);
-        RemoveShortcuts(installDir, dataDir, testMode);
-        RemoveUninstallerRegistration(dataDir, testMode);
+        RemoveShortcuts(installDir, isolatedMode);
+        RemoveUninstallerRegistration(isolatedMode);
 
         if (Directory.Exists(installDir))
         {
@@ -868,13 +860,13 @@ public static partial class Program
                 File.Delete(uninstExe);
             }
 
-            if (!testMode && !Directory.EnumerateFileSystemEntries(installDir).Any())
+            if (!isolatedMode && !Directory.EnumerateFileSystemEntries(installDir).Any())
             {
                 Directory.Delete(installDir, recursive: false);
             }
         }
 
-        WriteLog(logDir, "INFO", $"Uninstalled {meta.AppName} v{meta.Version} from {installDir} (purge_data={purgeData}, test_mode={testMode}).");
+        WriteLog(logDir, "INFO", $"Uninstalled {meta.AppName} v{meta.Version} from {installDir} (purge_data={purgeData}, isolated={isolatedMode}).");
         Console.WriteLine($"Uninstalled {meta.AppName} from {installDir}");
         return 0;
     }
@@ -1086,7 +1078,7 @@ public static partial class Program
         if (stream == null)
         {
             string asmVer = Assembly.GetExecutingAssembly()
-                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.1.12";
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "0.1.12-hf.1";
             int plusIdx = asmVer.IndexOf('+');
             if (plusIdx > 0)
             {
@@ -1096,17 +1088,17 @@ public static partial class Program
         }
 
         var meta = JsonSerializer.Deserialize<EmbeddedMetadata>(stream);
-        return meta ?? new EmbeddedMetadata("Housekeeping", "0.1.12", "", 0);
+        return meta ?? new EmbeddedMetadata("Housekeeping", "0.1.12-hf.1", "", 0);
     }
 
-    private static string ResolveInstallDirectory(string? explicitDir, string? dataDir, bool testMode, bool silent, bool dryRun)
+    private static string ResolveInstallDirectory(string? explicitDir, string? dataDir, bool isolatedMode, bool silent, bool dryRun)
     {
         if (!string.IsNullOrWhiteSpace(explicitDir))
         {
             return Path.GetFullPath(explicitDir);
         }
 
-        if (testMode && !string.IsNullOrWhiteSpace(dataDir))
+        if (isolatedMode && !string.IsNullOrWhiteSpace(dataDir))
         {
             return Path.GetFullPath(Path.Combine(dataDir, "installed_app"));
         }
@@ -1166,74 +1158,56 @@ public static partial class Program
         return null;
     }
 
-    private static void ValidateContainment(string installDir, string? dataDir, string? logDir, bool testMode)
+    private static void ValidateContainment(string installDir, string? dataDir, string? logDir, bool isolatedMode)
     {
-        if (!testMode && string.IsNullOrWhiteSpace(dataDir))
+        if (!isolatedMode && string.IsNullOrWhiteSpace(dataDir))
         {
             return;
         }
 
         if (string.IsNullOrWhiteSpace(dataDir))
         {
-            throw new InvalidOperationException("Fail-closed sandbox violation: --data-dir is required in --test-mode.");
+            throw new InvalidOperationException("Fail-closed isolation violation: --data-dir is required when APP_ISOLATED_TEST is enabled.");
         }
 
         string allowedData = EnsureTrailingSep(Path.GetFullPath(dataDir));
         string? allowedParent = Directory.GetParent(Path.GetFullPath(dataDir))?.FullName;
-        string allowedSandbox = string.IsNullOrWhiteSpace(allowedParent)
+        string allowedRoot = string.IsNullOrWhiteSpace(allowedParent)
             ? allowedData
             : EnsureTrailingSep(Path.GetFullPath(allowedParent));
 
         string normInstall = EnsureTrailingSep(Path.GetFullPath(installDir));
         if (!normInstall.StartsWith(allowedData, StringComparison.OrdinalIgnoreCase) &&
-            !normInstall.StartsWith(allowedSandbox, StringComparison.OrdinalIgnoreCase))
+            !normInstall.StartsWith(allowedRoot, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                $"Fail-closed sandbox containment violation: install target '{installDir}' escapes sandbox '{allowedSandbox}'.");
+                $"Fail-closed containment violation: install target '{installDir}' escapes isolated root '{allowedRoot}'.");
         }
 
         if (!string.IsNullOrWhiteSpace(logDir))
         {
             string normLog = EnsureTrailingSep(Path.GetFullPath(logDir));
             if (!normLog.StartsWith(allowedData, StringComparison.OrdinalIgnoreCase) &&
-                !normLog.StartsWith(allowedSandbox, StringComparison.OrdinalIgnoreCase))
+                !normLog.StartsWith(allowedRoot, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    $"Fail-closed sandbox containment violation: log directory '{logDir}' escapes sandbox '{allowedSandbox}'.");
+                    $"Fail-closed containment violation: log directory '{logDir}' escapes isolated root '{allowedRoot}'.");
             }
         }
     }
 
-    private static void CreateShortcuts(string installDir, string? dataDir, bool testMode)
+    private static void CreateShortcuts(string installDir, bool isolatedMode)
     {
+        if (isolatedMode || !OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         string targetExe = Path.Combine(installDir, "Housekeeping.exe");
         string iconPath = Path.Combine(installDir, "app", "Assets", "app_icon.ico");
         if (!File.Exists(iconPath))
         {
             iconPath = Path.Combine(installDir, "Assets", "app_icon.ico");
-        }
-
-        if (testMode && !string.IsNullOrWhiteSpace(dataDir))
-        {
-            string virtualStartMenu = Path.Combine(dataDir, "virtual_shortcuts");
-            Directory.CreateDirectory(virtualStartMenu);
-            var shortcutMeta = new Dictionary<string, string>
-            {
-                ["name"] = ShortcutFileName,
-                ["target"] = targetExe,
-                ["working_directory"] = installDir,
-                ["icon"] = iconPath
-            };
-            File.WriteAllText(
-                Path.Combine(virtualStartMenu, "Housekeeping.shortcut.json"),
-                JsonSerializer.Serialize(shortcutMeta, new JsonSerializerOptions { WriteIndented = true }),
-                Encoding.UTF8);
-            return;
-        }
-
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
         }
 
         string startMenu = Environment.GetFolderPath(Environment.SpecialFolder.Programs);
@@ -1244,15 +1218,10 @@ public static partial class Program
         }
     }
 
-    private static void RemoveShortcuts(string installDir, string? dataDir, bool testMode)
+    private static void RemoveShortcuts(string installDir, bool isolatedMode)
     {
-        if (testMode && !string.IsNullOrWhiteSpace(dataDir))
+        if (isolatedMode || !OperatingSystem.IsWindows())
         {
-            string virtualDir = Path.Combine(dataDir, "virtual_shortcuts");
-            if (Directory.Exists(virtualDir))
-            {
-                Directory.Delete(virtualDir, recursive: true);
-            }
             return;
         }
 
@@ -1342,10 +1311,14 @@ public static partial class Program
     private static void RegisterUninstaller(
         string installDir,
         string uninstallerPath,
-        string? dataDir,
-        bool testMode,
+        bool isolatedMode,
         EmbeddedMetadata meta)
     {
+        if (isolatedMode || !OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
         string iconPath = Path.Combine(installDir, "app", "Assets", "app_icon.ico");
         if (!File.Exists(iconPath))
         {
@@ -1364,21 +1337,6 @@ public static partial class Program
             ["NoRepair"] = 1
         };
 
-        if (testMode && !string.IsNullOrWhiteSpace(dataDir))
-        {
-            Directory.CreateDirectory(dataDir);
-            File.WriteAllText(
-                Path.Combine(dataDir, "uninstall-registry.json"),
-                JsonSerializer.Serialize(entries, new JsonSerializerOptions { WriteIndented = true }),
-                Encoding.UTF8);
-            return;
-        }
-
-        if (!OperatingSystem.IsWindows())
-        {
-            return;
-        }
-
         using var key = Registry.CurrentUser.CreateSubKey(UninstallRegistrySubKey);
         if (key != null)
         {
@@ -1396,19 +1354,9 @@ public static partial class Program
         }
     }
 
-    private static void RemoveUninstallerRegistration(string? dataDir, bool testMode)
+    private static void RemoveUninstallerRegistration(bool isolatedMode)
     {
-        if (testMode && !string.IsNullOrWhiteSpace(dataDir))
-        {
-            string regJson = Path.Combine(dataDir, "uninstall-registry.json");
-            if (File.Exists(regJson))
-            {
-                File.Delete(regJson);
-            }
-            return;
-        }
-
-        if (!OperatingSystem.IsWindows())
+        if (isolatedMode || !OperatingSystem.IsWindows())
         {
             return;
         }
@@ -1467,17 +1415,16 @@ public static partial class Program
         Console.WriteLine("  Housekeeping-Setup.exe --uninstall [--install-dir <targetDir>] [--purge-data]\n");
         Console.WriteLine("Options:");
         Console.WriteLine("  --install-dir|--target-dir <dir>  Target installation directory (default: %LOCALAPPDATA%\\Programs\\Housekeeping)");
-        Console.WriteLine("  --silent|--quiet | --headless     Non-interactive execution without console prompts");
+        Console.WriteLine("  --silent|--quiet                  Non-interactive execution without console prompts");
         Console.WriteLine("  --launch | -l                     Launch Housekeeping after setup completes");
         Console.WriteLine("  --no-launch                       Do not automatically relaunch Housekeeping after upgrade");
         Console.WriteLine("  --no-shortcuts                    Skip Start Menu and application folder .lnk creation");
         Console.WriteLine("  --verify                          Verify embedded payload SHA-256 without writing files");
         Console.WriteLine("  --uninstall                       Remove installed binaries, shortcuts, and Windows Uninstall entry");
         Console.WriteLine("  --purge-data                      Also delete user settings/history/logs/dats directories on --uninstall");
-        Console.WriteLine("  --data-dir <dir>                  Sandbox containment root (overrides HOUSEKEEPING_DATA_DIR / DATA_DIR / APP_HOME)");
+        Console.WriteLine("  --data-dir <dir>                  Isolated runtime containment root (overrides HOUSEKEEPING_DATA_DIR / DATA_DIR / APP_HOME)");
         Console.WriteLine("  --config <jsonPath>               JSON config override (overrides HOUSEKEEPING_CONFIG_FILE / CONFIG_PATH)");
         Console.WriteLine("  --log-dir <dir>                   Directory for structured installer.log (overrides HOUSEKEEPING_LOG_DIR / LOG_DIR)");
-        Console.WriteLine("  --test-mode                       Enforce fail-closed sandbox containment & virtualize Registry/shortcuts");
         Console.WriteLine("  --dry-run                         Verify payload and print target path without mutating disk");
         Console.WriteLine("  --version | -v                    Print embedded installer version and exit");
         Console.WriteLine("  --help | -h | /?                  Show this help message");
@@ -1496,9 +1443,7 @@ public static partial class Program
         public bool LaunchAfter { get; set; }
         public bool NoLaunch { get; set; }
         public bool Silent { get; set; }
-        public bool TestMode { get; set; }
         public bool DryRun { get; set; }
-        public bool Headless { get; set; }
         public bool ShowVersion { get; set; }
         public bool Help { get; set; }
     }
@@ -1551,14 +1496,8 @@ public static partial class Program
                 case "--quiet":
                     o.Silent = true;
                     break;
-                case "--test-mode":
-                    o.TestMode = true;
-                    break;
                 case "--dry-run":
                     o.DryRun = true;
-                    break;
-                case "--headless":
-                    o.Headless = true;
                     break;
                 case "-v":
                 case "--version":

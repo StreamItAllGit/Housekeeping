@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Housekeeping.Server</AssemblyName>
+    <RootNamespace>Housekeeping.Server</RootNamespace>
+    <Title>Housekeeping Web &amp; Fleet Server</Title>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Housekeeping.Core\Housekeeping.Core.csproj" />
+  </ItemGroup>
+
+</Project>

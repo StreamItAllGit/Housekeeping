@@ -80,8 +80,7 @@ namespace Housekeeping.Services
         public string ActiveHistoryFilePath { get; }
         public string ActiveLogsDir { get; }
         public string SnapshotsDir { get; }
-        public bool IsTestMode { get; }
-        public bool IsSandboxed => _isCustomBaseDir || _isCustomConfigPath || _isCustomLogsDir || IsTestMode;
+        public bool IsIsolatedOverride { get; }
 
         public AppConfig Config { get; private set; } = new();
         public List<RunHistoryEntry> History { get; private set; } = new();
@@ -91,10 +90,8 @@ namespace Housekeeping.Services
             string? customBaseDir = null,
             string? customConfigFilePath = null,
             string? customLogsDir = null,
-            bool isTestMode = false)
+            bool isolatedOverride = false)
         {
-            IsTestMode = isTestMode || IsTruthyEnv("HOUSEKEEPING_TEST_MODE") || IsTruthyEnv("TEST_MODE");
-
             string? resolvedConfigPath = customConfigFilePath;
             if (string.IsNullOrWhiteSpace(resolvedConfigPath))
             {
@@ -118,6 +115,7 @@ namespace Housekeeping.Services
             }
 
             _isCustomBaseDir = !string.IsNullOrWhiteSpace(resolvedBaseDir);
+            IsIsolatedOverride = isolatedOverride || _isCustomBaseDir || _isCustomConfigPath || _isCustomLogsDir || IsTruthyEnv("APP_ISOLATED_TEST");
 
             string runtimeBase = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
                 .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -549,7 +547,7 @@ namespace Housekeeping.Services
                 AtomicWriteAllText(ActiveConfigFilePath, json);
                 WriteRollingSnapshotLocked(json);
                 Config = candidate;
-                if (!IsSandboxed)
+                if (!IsIsolatedOverride)
                 {
                     ApplyWindowsStartupSetting(candidate.StartWithWindows);
                 }

@@ -1,5 +1,5 @@
 // @module: Housekeeping.Tests.AuditV0112DataAndShutdownTests
-// @purpose: Regression suite for BUG-01 (exclusive SMB pre-probe & root migration), BUG-02/T2 (3-tier stop vs graceful shutdown), BUG-03, and OPT-02.
+// @purpose: Regression suite for BUG-01 (exclusive SMB pre-probe & root migration), BUG-02/T2 (dual-mode stop vs graceful shutdown), BUG-03, and OPT-02.
 // @depends-on: System, System.Collections.Concurrent, System.IO, System.Net.Sockets, System.Text.Json, Housekeeping.Models, Housekeeping.Server.Hosting, Housekeeping.Services, Xunit
 // @exports: Housekeeping.Tests.AuditV0112DataAndShutdownTests
 
@@ -261,7 +261,7 @@ namespace Housekeeping.Tests
             try
             {
                 var args = new UnobservedTaskExceptionEventArgs(resetEx);
-                bool wrote = CrashBundleService.HandleUnobservedTaskException(args, logsDirOverride: tempLogs, buildVersionOverride: "0.1.12");
+                bool wrote = CrashBundleService.HandleUnobservedTaskException(args, logsDirOverride: tempLogs, buildVersionOverride: "0.1.12-hf.1");
                 Assert.True(args.Observed);
                 Assert.False(wrote);
 

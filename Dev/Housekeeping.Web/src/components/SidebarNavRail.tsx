@@ -56,7 +56,7 @@ export const SidebarNavRail: React.FC<SidebarNavRailProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setActiveTab]);
 
-  const rawVersion = authStatus?.version || '0.1.12';
+  const rawVersion = authStatus?.version || '0.1.12-hf.1';
   const versionStr = rawVersion.startsWith('v') ? rawVersion : `v${rawVersion}`;
 
   return (

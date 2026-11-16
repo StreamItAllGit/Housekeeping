@@ -452,30 +452,28 @@ namespace Housekeeping.Tests
         }
 
         [Fact]
-        public void Env001_CliParser_SupportsAllSandboxFlags_EqualsSyntax_And_EnvFallbacks()
+        public void Env001_CliParser_SupportsAllIsolationFlags_EqualsSyntax_And_EnvFallbacks()
         {
             var parsed = HousekeepingCliParser.Parse(new[]
             {
-                "--data-dir", @"D:\Temp\Sandbox\data",
-                "--config=D:\\Temp\\Sandbox\\data\\custom_settings.json",
-                "--log-dir", @"D:\Temp\Sandbox\logs",
+                "--data-dir", @"D:\Temp\IsolatedHk\data",
+                "--config=D:\\Temp\\IsolatedHk\\data\\custom_settings.json",
+                "--log-dir", @"D:\Temp\IsolatedHk\logs",
                 "--port=5199",
                 "--localhost-only",
-                "--headless",
-                "--test-mode",
+                "--tray-only",
                 "--dry-run"
             });
 
             Assert.Null(parsed.ParseError);
-            Assert.Equal(@"D:\Temp\Sandbox\data", parsed.CustomDataDirectory);
-            Assert.Equal(@"D:\Temp\Sandbox\data\custom_settings.json", parsed.CustomConfigFilePath);
-            Assert.Equal(@"D:\Temp\Sandbox\logs", parsed.CustomLogsDirectory);
+            Assert.Equal(@"D:\Temp\IsolatedHk\data", parsed.CustomDataDirectory);
+            Assert.Equal(@"D:\Temp\IsolatedHk\data\custom_settings.json", parsed.CustomConfigFilePath);
+            Assert.Equal(@"D:\Temp\IsolatedHk\logs", parsed.CustomLogsDirectory);
             Assert.Equal(5199, parsed.PortOverride);
             Assert.False(parsed.BindLanOverride);
-            Assert.True(parsed.Headless);
-            Assert.True(parsed.TestMode);
+            Assert.True(parsed.StartMinimized);
             Assert.True(parsed.DryRun);
-            Assert.True(parsed.IsSandboxedInvocation);
+            Assert.True(parsed.IsIsolatedInvocation);
 
             var badPort = HousekeepingCliParser.Parse(new[] { "--port", "99999" });
             Assert.NotNull(badPort.ParseError);
@@ -487,7 +485,7 @@ namespace Housekeeping.Tests
             Assert.Contains("--data-dir", helpText);
             Assert.Contains("--config", helpText);
             Assert.Contains("--log-dir", helpText);
-            Assert.Contains("--test-mode", helpText);
+            Assert.Contains("--tray-only", helpText);
             Assert.Contains("--dry-run", helpText);
 
             // Environment variable fallbacks
@@ -495,7 +493,7 @@ namespace Housekeeping.Tests
             string? prevCfg = Environment.GetEnvironmentVariable("CONFIG_PATH");
             string? prevLog = Environment.GetEnvironmentVariable("LOG_DIR");
             string? prevPort = Environment.GetEnvironmentVariable("PORT");
-            string? prevTest = Environment.GetEnvironmentVariable("HOUSEKEEPING_TEST_MODE");
+            string? prevIso = Environment.GetEnvironmentVariable("APP_ISOLATED_TEST");
             string? prevDry = Environment.GetEnvironmentVariable("HOUSEKEEPING_DRY_RUN");
             try
             {
@@ -503,7 +501,7 @@ namespace Housekeeping.Tests
                 Environment.SetEnvironmentVariable("CONFIG_PATH", @"D:\Temp\EnvHome\env_cfg.json");
                 Environment.SetEnvironmentVariable("LOG_DIR", @"D:\Temp\EnvLogs");
                 Environment.SetEnvironmentVariable("PORT", "5288");
-                Environment.SetEnvironmentVariable("HOUSEKEEPING_TEST_MODE", "true");
+                Environment.SetEnvironmentVariable("APP_ISOLATED_TEST", "1");
                 Environment.SetEnvironmentVariable("HOUSEKEEPING_DRY_RUN", "1");
 
                 var fromEnv = HousekeepingCliParser.Parse(Array.Empty<string>());
@@ -511,7 +509,7 @@ namespace Housekeeping.Tests
                 Assert.Equal(@"D:\Temp\EnvHome\env_cfg.json", fromEnv.CustomConfigFilePath);
                 Assert.Equal(@"D:\Temp\EnvLogs", fromEnv.CustomLogsDirectory);
                 Assert.Equal(5288, fromEnv.PortOverride);
-                Assert.True(fromEnv.TestMode);
+                Assert.True(fromEnv.IsIsolatedInvocation);
                 Assert.True(fromEnv.DryRun);
             }
             finally
@@ -520,18 +518,18 @@ namespace Housekeeping.Tests
                 Environment.SetEnvironmentVariable("CONFIG_PATH", prevCfg);
                 Environment.SetEnvironmentVariable("LOG_DIR", prevLog);
                 Environment.SetEnvironmentVariable("PORT", prevPort);
-                Environment.SetEnvironmentVariable("HOUSEKEEPING_TEST_MODE", prevTest);
+                Environment.SetEnvironmentVariable("APP_ISOLATED_TEST", prevIso);
                 Environment.SetEnvironmentVariable("HOUSEKEEPING_DRY_RUN", prevDry);
             }
         }
 
         [Fact]
-        public async Task Env002_SandboxedTestMode_And_ForceDryRun_ContainAllFiles_And_SimulateHostSideEffects()
+        public async Task Env002_IsolatedMode_And_ForceDryRun_ContainAllFiles_And_SimulateHostSideEffects()
         {
-            string rootDir = Path.Combine(Path.GetTempPath(), $"hk_rc7_sandbox_{Guid.NewGuid():N}");
+            string rootDir = Path.Combine(Path.GetTempPath(), $"hk_rc7_isolated_{Guid.NewGuid():N}");
             string dataDir = Path.Combine(rootDir, "data");
             string logDir = Path.Combine(rootDir, "logs");
-            string customCfgPath = Path.Combine(dataDir, "sandbox_custom.json");
+            string customCfgPath = Path.Combine(dataDir, "isolated_custom.json");
             Directory.CreateDirectory(dataDir);
             Directory.CreateDirectory(logDir);
 
@@ -545,7 +543,7 @@ namespace Housekeeping.Tests
                     CustomDataDirectory = dataDir,
                     CustomConfigFilePath = customCfgPath,
                     CustomLogsDirectory = logDir,
-                    TestMode = true,
+                    IsolatedOverride = true,
                     DryRun = true,
                     StartBackgroundTimers = false
                 });
@@ -554,8 +552,7 @@ namespace Housekeeping.Tests
             try
             {
                 var runtime = app.Services.GetRequiredService<HousekeepingRuntimeContainer>();
-                Assert.True(runtime.ConfigService.IsTestMode);
-                Assert.True(runtime.ConfigService.IsSandboxed);
+                Assert.True(runtime.ConfigService.IsIsolatedOverride);
                 Assert.True(runtime.Orchestrator.ForceDryRun);
                 Assert.Equal(Path.GetFullPath(customCfgPath), runtime.ConfigService.ActiveConfigFilePath);
                 Assert.Equal(Path.GetFullPath(logDir), runtime.ConfigService.ActiveLogsDir);
@@ -564,24 +561,23 @@ namespace Housekeeping.Tests
                 Assert.True(File.Exists(Path.Combine(dataDir, ".hk_cookie_secret.key")));
                 Assert.False(File.Exists(Path.Combine(logDir, ".hk_cookie_secret.key")));
 
-                // Default GreenroomRootPath must contain zero hardcoded host paths and resolve inside dataDir in TestMode
+                // Default GreenroomRootPath must contain zero hardcoded host paths and resolve inside dataDir when isolated
                 Assert.Equal("", AppConfig.CreateDefaults().GreenroomIntegration.GreenroomRootPath);
                 string grCli = runtime.GreenroomSync.ResolveCliBatchPath();
                 Assert.StartsWith(Path.GetFullPath(dataDir), Path.GetFullPath(grCli), StringComparison.OrdinalIgnoreCase);
 
                 using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{port}") };
 
-                // 1. /api/v1/health exposes sandbox & dry-run telemetry
+                // 1. /api/v1/health exposes isolated & dry-run telemetry
                 using (var healthResp = await client.GetAsync("/api/v1/health"))
                 {
                     healthResp.EnsureSuccessStatusCode();
                     using var doc = JsonDocument.Parse(await healthResp.Content.ReadAsStringAsync());
-                    Assert.True(doc.RootElement.GetProperty("isTestMode").GetBoolean());
-                    Assert.True(doc.RootElement.GetProperty("isSandboxed").GetBoolean());
+                    Assert.True(doc.RootElement.GetProperty("isIsolated").GetBoolean());
                     Assert.True(doc.RootElement.GetProperty("forceDryRun").GetBoolean());
                 }
 
-                // 2. /api/v1/settings/watchdog simulates in TestMode without mutating Windows Task Scheduler
+                // 2. /api/v1/settings/watchdog simulates when isolated without mutating Windows Task Scheduler
                 using (var wdResp = await client.PostAsync(
                     "/api/v1/settings/watchdog",
                     new StringContent("{\"Enabled\":true}", Encoding.UTF8, "application/json")))
