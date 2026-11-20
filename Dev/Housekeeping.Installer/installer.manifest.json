@@ -1,0 +1,78 @@
+{
+  "$schema": "https://schemas.local/manifest.v2.json",
+  "schemaVersion": 2,
+  "manifestType": "installer-manifest",
+  "appId": "housekeeping",
+  "version": "0.2.0",
+  "updatedAtUtc": "2026-11-20T11:15:00.000Z",
+  "displayName": "Housekeeping",
+  "publisher": "StreamItAll",
+  "subtitle": "Clean Release Root (Housekeeping.exe + app\\, scripts\\, data\\, logs\\)",
+  "studioName": "StreamItAll",
+  "suiteId": "mother",
+  "suiteName": "Mother",
+  "umbrellaSubpath": "StreamItAll\\Mother\\Housekeeping",
+  "mainExecutableRelativePath": "Housekeeping.exe",
+  "logoPath": "Housekeeping.Installer.Assets.app_icon.png",
+  "iconPath": "Housekeeping.Installer.Assets.app_icon.ico",
+  "layoutMode": "single-line",
+  "supportedProfiles": [
+    "lightweight",
+    "full",
+    "custom"
+  ],
+  "defaultProfile": "full",
+  "allowAutoStart": true,
+  "allowLegacyMigration": true,
+  "theme": {
+    "background": "#0B0E14",
+    "surface": "#121722",
+    "accent": "#F59E0B",
+    "text": "#E2E8F0",
+    "border": "#1F2937"
+  },
+  "buttons": {
+    "installText": "Install Now",
+    "upgradeText": "Upgrade Now",
+    "uninstallText": "Uninstall",
+    "cancelText": "Cancel"
+  },
+  "tooltips": {
+    "installDir": {
+      "title": "Housekeeping Install Folder",
+      "description": "Destination for Housekeeping.exe and app\\, scripts\\, data\\, logs\\ Clean Release Root."
+    },
+    "secondaryDir": {
+      "title": "Shared Suite Umbrella Directory",
+      "description": "Root umbrella directory containing Mother and installed sister applications."
+    },
+    "profile": {
+      "title": "Installation Footprint Profile",
+      "description": "Select Full for bundled Web UI and scripts, Lightweight for core runtime, or Custom."
+    },
+    "shortcuts": {
+      "title": "Desktop & Start Menu Shortcuts",
+      "description": "Creates Windows Desktop and Start Menu shortcuts pointing to Housekeeping.exe."
+    },
+    "autoStart": {
+      "title": "Launch at Windows Sign-In",
+      "description": "Adds Housekeeping to your Startup folder so background maintenance stays ready."
+    },
+    "launchAfter": {
+      "title": "Launch After Setup Completes",
+      "description": "Starts Housekeeping immediately once installation or upgrade verification finishes."
+    },
+    "migrateLegacy": {
+      "title": "Migrate Legacy Installation",
+      "description": "Opt-in copy of existing settings, data, and logs into the new umbrella layout."
+    }
+  },
+  "secondaryPickers": [
+    {
+      "flagName": "--suite-dir",
+      "label": "Shared Suite Umbrella Directory:",
+      "placeholder": "%LOCALAPPDATA%\\Programs\\StreamItAll\\Mother",
+      "tooltip": "Root directory containing Mother and installed sister applications."
+    }
+  ]
+}

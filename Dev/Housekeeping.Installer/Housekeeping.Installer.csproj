@@ -7,33 +7,79 @@
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>Housekeeping.Installer</AssemblyName>
     <RootNamespace>Housekeeping.Installer</RootNamespace>
+    <ApplicationIcon>..\Housekeeping.DesktopHost\Assets\app_icon.ico</ApplicationIcon>
+    <Title>Housekeeping Setup</Title>
     <Product>Housekeeping</Product>
     <Company>StreamItAll</Company>
     <Description>Housekeeping Self-Contained Windows Setup and Uninstaller</Description>
     <Version Condition="'$(InstallerVersion)' != ''">$(InstallerVersion)</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
-    <ApplicationIcon Condition="'$(InstallerIconPath)' != '' and Exists('$(InstallerIconPath)')">$(InstallerIconPath)</ApplicationIcon>
-    <Deterministic>true</Deterministic>
-    <PathMap>$(MSBuildThisFileDirectory)=/_/,$(USERPROFILE)=/user/</PathMap>
-    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-    <DebugType>none</DebugType>
-    <DebugSymbols>false</DebugSymbols>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>true</SelfContained>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
-    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <PublishSingleFile Condition="'$(RuntimeIdentifier)' != ''">true</PublishSingleFile>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">false</SelfContained>
+    <EnableCompressionInSingleFile Condition="'$(RuntimeIdentifier)' != '' and '$(SelfContained)' == 'true'">true</EnableCompressionInSingleFile>
   </PropertyGroup>
 
-  <ItemGroup Condition="'$(InstallerPayloadZip)' != '' and Exists('$(InstallerPayloadZip)')">
-    <EmbeddedResource Include="$(InstallerPayloadZip)"
-                      LogicalName="Housekeeping.Installer.Embedded.payload.zip" />
+  <ItemGroup>
+    <Reference Include="Foundation.Core">
+      <HintPath>..\lib\Foundation.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Foundation.Installer">
+      <HintPath>..\lib\Foundation.Installer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <EmbeddedResource Include="..\Housekeeping.DesktopHost\Assets\app_icon.ico"
+                      LogicalName="Housekeeping.Installer.Assets.app_icon.ico"
+                      Condition="Exists('..\Housekeeping.DesktopHost\Assets\app_icon.ico')" />
+    <EmbeddedResource Include="..\Housekeeping.DesktopHost\Assets\app_icon.png"
+                      LogicalName="Housekeeping.Installer.Assets.app_icon.png"
+                      Condition="Exists('..\Housekeeping.DesktopHost\Assets\app_icon.png')" />
+    <EmbeddedResource Include="installer.manifest.json"
+                      LogicalName="Housekeeping.Installer.Embedded.installer.manifest.json"
+                      Condition="Exists('installer.manifest.json')" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(InstallerMetadataJson)' != '' and Exists('$(InstallerMetadataJson)')">
-    <EmbeddedResource Include="$(InstallerMetadataJson)"
-                      LogicalName="Housekeeping.Installer.Embedded.metadata.json" />
+  <ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(HousekeepingTestAutomation)' == 'true'">
+    <Reference Include="Foundation.UI">
+      <HintPath>..\lib\Foundation.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Foundation.Automation">
+      <HintPath>..\lib\Foundation.Automation.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <Target Name="CompressFoundationAssemblies"
+          BeforeTargets="AssignTargetPaths;PrepareResourceNames;PrepareResources">
+    <MakeDir Directories="$(IntermediateOutputPath)" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;foreach ($n in @('Foundation.Core.dll','Foundation.Installer.dll')) { $src = Join-Path '$(MSBuildProjectDirectory)\..\lib' $n; $dst = Join-Path ([System.IO.Path]::GetFullPath([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)'))) ($n + '.gz'); $inBytes = [System.IO.File]::ReadAllBytes($src); $fs = [System.IO.File]::Create($dst); try { $gz = New-Object System.IO.Compression.GZipStream($fs, [System.IO.Compression.CompressionLevel]::Optimal); try { $gz.Write($inBytes, 0, $inBytes.Length) } finally { $gz.Dispose() } } finally { $fs.Dispose() } }&quot;" />
+    <Exec Condition="'$(Configuration)' == 'Debug' or '$(HousekeepingTestAutomation)' == 'true'"
+          Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;foreach ($n in @('Foundation.UI.dll','Foundation.Automation.dll')) { $src = Join-Path '$(MSBuildProjectDirectory)\..\lib' $n; $dst = Join-Path ([System.IO.Path]::GetFullPath([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)'))) ($n + '.gz'); $inBytes = [System.IO.File]::ReadAllBytes($src); $fs = [System.IO.File]::Create($dst); try { $gz = New-Object System.IO.Compression.GZipStream($fs, [System.IO.Compression.CompressionLevel]::Optimal); try { $gz.Write($inBytes, 0, $inBytes.Length) } finally { $gz.Dispose() } } finally { $fs.Dispose() } }&quot;" />
+    <ItemGroup>
+      <EmbeddedResource Remove="$(IntermediateOutputPath)Foundation.Core.dll.gz;$(IntermediateOutputPath)Foundation.Installer.dll.gz;$(IntermediateOutputPath)Foundation.UI.dll.gz;$(IntermediateOutputPath)Foundation.Automation.dll.gz" />
+      <EmbeddedResource Include="$(IntermediateOutputPath)Foundation.Core.dll.gz" LogicalName="Foundation.Core.dll.gz" />
+      <EmbeddedResource Include="$(IntermediateOutputPath)Foundation.Installer.dll.gz" LogicalName="Foundation.Installer.dll.gz" />
+      <EmbeddedResource Include="$(IntermediateOutputPath)Foundation.UI.dll.gz"
+                        LogicalName="Foundation.UI.dll.gz"
+                        Condition="'$(Configuration)' == 'Debug' or '$(HousekeepingTestAutomation)' == 'true'" />
+      <EmbeddedResource Include="$(IntermediateOutputPath)Foundation.Automation.dll.gz"
+                        LogicalName="Foundation.Automation.dll.gz"
+                        Condition="'$(Configuration)' == 'Debug' or '$(HousekeepingTestAutomation)' == 'true'" />
+    </ItemGroup>
+  </Target>
+
+  <PropertyGroup>
+    <_EffectivePayloadZip Condition="'$(InstallerPayloadZip)' != ''">$(InstallerPayloadZip)</_EffectivePayloadZip>
+    <_EffectivePayloadZip Condition="'$(_EffectivePayloadZip)' == '' and '$(InstallerPayloadArchive)' != ''">$(InstallerPayloadArchive)</_EffectivePayloadZip>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(_EffectivePayloadZip)' != '' and Exists('$(_EffectivePayloadZip)')">
+    <EmbeddedResource Include="$(_EffectivePayloadZip)"
+                      LogicalName="Housekeeping.Installer.Embedded.payload.zip" />
   </ItemGroup>
 
 </Project>

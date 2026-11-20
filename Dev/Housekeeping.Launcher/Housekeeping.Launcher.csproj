@@ -9,14 +9,18 @@
     <AssemblyName>Housekeeping</AssemblyName>
     <RootNamespace>Housekeeping.Launcher</RootNamespace>
     <ApplicationIcon>..\Housekeeping.DesktopHost\Assets\app_icon.ico</ApplicationIcon>
-    <AssemblyTitle>Housekeeping</AssemblyTitle>
+    <Title>Housekeeping</Title>
     <Product>Housekeeping</Product>
     <Company>StreamItAll</Company>
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
-    <DebugType>none</DebugType>
-    <DebugSymbols>false</DebugSymbols>
-    <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
+    <PublishSingleFile Condition="'$(PublishAot)' != 'true' and '$(RuntimeIdentifier)' != ''">true</PublishSingleFile>
+    <SelfContained Condition="'$(RuntimeIdentifier)' != ''">false</SelfContained>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="Foundation.Launcher">
+      <HintPath>..\lib\Foundation.Launcher.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
 
 </Project>
