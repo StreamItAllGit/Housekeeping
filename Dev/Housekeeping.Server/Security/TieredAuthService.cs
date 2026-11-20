@@ -2,7 +2,9 @@ using System;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Net;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using Housekeeping.Models;
 using Housekeeping.Services;
@@ -60,36 +62,101 @@ namespace Housekeeping.Server.Security
         {
             try
             {
-                // Preserve existing sessions if legacy key already lives in logs\
-                string legacyKeyPath = Path.Combine(legacyLogsDir, ".hk_cookie_secret.key");
-                if (File.Exists(legacyKeyPath))
-                {
-                    string legacyHex = File.ReadAllText(legacyKeyPath, Encoding.UTF8).Trim();
-                    if (legacyHex.Length >= 64)
-                    {
-                        return Convert.FromHexString(legacyHex[..64]);
-                    }
-                }
-
                 Directory.CreateDirectory(dataDir);
                 string keyPath = Path.Combine(dataDir, ".hk_cookie_secret.key");
-                if (File.Exists(keyPath))
+                string legacyKeyPath = string.IsNullOrWhiteSpace(legacyLogsDir) ? "" : Path.Combine(legacyLogsDir, ".hk_cookie_secret.key");
+                bool hasDistinctLegacy = !string.IsNullOrWhiteSpace(legacyKeyPath) &&
+                    !string.Equals(Path.GetFullPath(keyPath), Path.GetFullPath(legacyKeyPath), StringComparison.OrdinalIgnoreCase);
+
+                byte[]? dataKey = TryReadHexKey(keyPath);
+                bool keyWritten = false;
+                if (dataKey == null)
                 {
-                    string hex = File.ReadAllText(keyPath, Encoding.UTF8).Trim();
-                    if (hex.Length >= 64)
-                    {
-                        return Convert.FromHexString(hex[..64]);
-                    }
+                    dataKey = (hasDistinctLegacy ? TryReadHexKey(legacyKeyPath) : null) ?? RandomNumberGenerator.GetBytes(32);
+                    WriteSigningKeyAtomically(keyPath, dataKey);
+                    keyWritten = true;
+                }
+                else
+                {
+                    ApplyStrictOwnerOnlyAcl(keyPath);
                 }
 
-                byte[] random = RandomNumberGenerator.GetBytes(32);
-                File.WriteAllText(keyPath, Convert.ToHexString(random), Encoding.UTF8);
-                return random;
+                if (hasDistinctLegacy && File.Exists(legacyKeyPath))
+                {
+                    byte[]? verified = keyWritten ? dataKey : TryReadHexKey(keyPath);
+                    if (verified != null && CryptographicOperations.FixedTimeEquals(verified, dataKey))
+                        File.Delete(legacyKeyPath);
+                }
+                return dataKey;
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[TieredAuthService] Falling back to ephemeral cookie signing key: {ex.Message}");
                 return RandomNumberGenerator.GetBytes(32);
+            }
+        }
+
+        private static byte[]? TryReadHexKey(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                string hex = File.ReadAllText(path, Encoding.UTF8).Trim();
+                return hex.Length >= 64 ? Convert.FromHexString(hex[..64]) : null;
+            }
+            catch { return null; }
+        }
+
+        private static void WriteSigningKeyAtomically(string keyPath, byte[] keyBytes)
+        {
+            string tmpPath = Path.Combine(Path.GetDirectoryName(keyPath)!, $".hk_cookie_secret.{Environment.ProcessId}.{Guid.NewGuid():N}.tmp");
+            try
+            {
+                using (var fs = new FileStream(tmpPath, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+                using (var writer = new StreamWriter(fs, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)))
+                {
+                    writer.Write(Convert.ToHexString(keyBytes));
+                    writer.Flush();
+                    fs.Flush(flushToDisk: true);
+                }
+                ApplyStrictOwnerOnlyAcl(tmpPath);
+                File.Move(tmpPath, keyPath, overwrite: true);
+                ApplyStrictOwnerOnlyAcl(keyPath);
+                byte[]? persisted = TryReadHexKey(keyPath);
+                if (persisted == null || !CryptographicOperations.FixedTimeEquals(persisted, keyBytes))
+                    throw new IOException("Failed to verify persisted cookie signing key.");
+            }
+            finally
+            {
+                if (File.Exists(tmpPath))
+                    try { File.Delete(tmpPath); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[TieredAuthService] Temp key cleanup skipped: {ex.Message}"); }
+            }
+        }
+
+        private static void ApplyStrictOwnerOnlyAcl(string filePath)
+        {
+            if (!OperatingSystem.IsWindows()) return;
+            try
+            {
+                var security = new FileSecurity();
+                security.SetAccessRuleProtection(isProtected: true, preserveInheritance: false);
+                using var identity = WindowsIdentity.GetCurrent();
+                var sids = new[]
+                {
+                    identity.User,
+                    new SecurityIdentifier(WellKnownSidType.LocalSystemSid, null),
+                    new SecurityIdentifier(WellKnownSidType.BuiltinAdministratorsSid, null)
+                };
+                foreach (var sid in sids)
+                {
+                    if (sid != null)
+                        security.AddAccessRule(new FileSystemAccessRule(sid, FileSystemRights.FullControl, AccessControlType.Allow));
+                }
+                new FileInfo(filePath).SetAccessControl(security);
+            }
+            catch (Exception ex) when (ex is UnauthorizedAccessException or PlatformNotSupportedException or SystemException)
+            {
+                System.Diagnostics.Debug.WriteLine($"[TieredAuthService] Key ACL hardening skipped ({filePath}): {ex.Message}");
             }
         }
 
@@ -313,76 +380,38 @@ namespace Housekeeping.Server.Security
             }
 
             if (!string.IsNullOrEmpty(providedApiToken) && ConstantTimeEquals(providedApiToken, ws.NodeApiToken))
-            {
-                return new AuthEvaluationResult
-                {
-                    IsAuthenticated = true,
-                    IsDirectLoopback = isRawLoopback && !hasForwardedFor,
-                    AuthMethod = "NodeApiToken",
-                    Identity = "fleet-node"
-                };
-            }
+                return AuthResult(true, isRawLoopback && !hasForwardedFor, "NodeApiToken", "fleet-node");
 
             // 2. Tailscale Serve Loopback Identity Header
             if (isRawLoopback && ws.TrustTailscaleServeHeaders && !string.IsNullOrEmpty(tailscaleLogin))
-            {
-                return new AuthEvaluationResult
-                {
-                    IsAuthenticated = true,
-                    IsDirectLoopback = false,
-                    IsTailscaleServe = true,
-                    AuthMethod = "TailscaleServe",
-                    Identity = tailscaleLogin
-                };
-            }
+                return AuthResult(true, false, "TailscaleServe", tailscaleLogin, tailscale: true);
 
             // 3. Direct Localhost Loopback Auto-Trust (Browser or WebView2 on the host PC)
             if (isRawLoopback && !hasForwardedFor)
-            {
-                return new AuthEvaluationResult
-                {
-                    IsAuthenticated = true,
-                    IsDirectLoopback = true,
-                    RequiresInitialPasswordSetup = !IsPasswordConfigured(),
-                    AuthMethod = "LocalLoopback",
-                    Identity = $"{Environment.MachineName}\\{Environment.UserName}"
-                };
-            }
+                return AuthResult(true, true, "LocalLoopback", $"{Environment.MachineName}\\{Environment.UserName}", setup: !IsPasswordConfigured());
 
             // 4. Signed Session Cookie (LAN / Tailnet / Remote Browser or Query Token for SignalR)
             if (context.Request.Cookies.TryGetValue(SessionCookieName, out string? cookieVal) &&
                 VerifySignedSessionToken(cookieVal, out string cookieUser))
-            {
-                return new AuthEvaluationResult
-                {
-                    IsAuthenticated = true,
-                    IsDirectLoopback = false,
-                    AuthMethod = "SessionCookie",
-                    Identity = cookieUser
-                };
-            }
+                return AuthResult(true, false, "SessionCookie", cookieUser);
 
             string accessTokenQuery = context.Request.Query["access_token"].ToString();
             if (!string.IsNullOrEmpty(accessTokenQuery) &&
                 (ConstantTimeEquals(accessTokenQuery, ws.NodeApiToken) || VerifySignedSessionToken(accessTokenQuery, out _)))
-            {
-                return new AuthEvaluationResult
-                {
-                    IsAuthenticated = true,
-                    IsDirectLoopback = false,
-                    AuthMethod = "SignalRQueryToken",
-                    Identity = "remote-hub"
-                };
-            }
+                return AuthResult(true, false, "SignalRQueryToken", "remote-hub");
 
-            return new AuthEvaluationResult
-            {
-                IsAuthenticated = false,
-                IsDirectLoopback = false,
-                RequiresInitialPasswordSetup = !IsPasswordConfigured(),
-                AuthMethod = "Unauthenticated"
-            };
+            return AuthResult(false, false, "Unauthenticated", setup: !IsPasswordConfigured());
         }
+
+        private static AuthEvaluationResult AuthResult(bool auth, bool loopback, string method, string identity = "", bool setup = false, bool tailscale = false) => new()
+        {
+            IsAuthenticated = auth,
+            IsDirectLoopback = loopback,
+            IsTailscaleServe = tailscale,
+            RequiresInitialPasswordSetup = setup,
+            AuthMethod = method,
+            Identity = identity
+        };
 
         private static bool ConstantTimeEquals(string a, string b)
         {

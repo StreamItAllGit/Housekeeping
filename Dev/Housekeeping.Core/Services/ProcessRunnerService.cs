@@ -115,13 +115,23 @@ namespace Housekeeping.Services
             return (trimmed, "");
         }
 
+        public Task<ProcessRunResult> RunCommandAsync(
+            string rawCommandLine,
+            bool useExternalCmdWindow,
+            string? workingDirectory,
+            bool belowNormalPriority,
+            bool logOutputToTerminal,
+            CancellationToken ct) =>
+            RunCommandAsync(rawCommandLine, useExternalCmdWindow, workingDirectory, belowNormalPriority, logOutputToTerminal, ct, environmentVariables: null);
+
         public async Task<ProcessRunResult> RunCommandAsync(
             string rawCommandLine,
             bool useExternalCmdWindow,
             string? workingDirectory,
             bool belowNormalPriority,
             bool logOutputToTerminal,
-            CancellationToken ct)
+            CancellationToken ct,
+            IReadOnlyDictionary<string, string>? environmentVariables = null)
         {
             var result = new ProcessRunResult();
             var (exePath, exeArgs) = SplitCommandLine(rawCommandLine);
@@ -151,10 +161,13 @@ namespace Housekeeping.Services
             else
             {
                 // Use cmd.exe /d /s /c "<rawCommandLine>" so outer quotes are stripped cleanly without breaking "C:\Program Files\..."
+                string effectiveCmd = useExternalCmdWindow
+                    ? PrependCmdEnvironmentAssignments(rawCommandLine, environmentVariables)
+                    : rawCommandLine;
                 startInfo = new ProcessStartInfo
                 {
                     FileName = "cmd.exe",
-                    Arguments = $"/d /s /c \"{rawCommandLine}\"",
+                    Arguments = $"/d /s /c \"{effectiveCmd}\"",
                     WorkingDirectory = !string.IsNullOrWhiteSpace(workingDirectory) && Directory.Exists(workingDirectory)
                         ? workingDirectory
                         : Environment.CurrentDirectory
@@ -174,6 +187,15 @@ namespace Housekeeping.Services
                     startInfo.RedirectStandardError = true;
                     startInfo.StandardOutputEncoding = Encoding.UTF8;
                     startInfo.StandardErrorEncoding = Encoding.UTF8;
+                }
+            }
+
+            if (!startInfo.UseShellExecute && environmentVariables != null)
+            {
+                foreach (var kvp in environmentVariables)
+                {
+                    if (!string.IsNullOrWhiteSpace(kvp.Key))
+                        startInfo.Environment[kvp.Key] = kvp.Value ?? "";
                 }
             }
 
@@ -374,6 +396,22 @@ namespace Housekeeping.Services
                     process.Kill(entireProcessTree: true);
             }
             catch (System.Exception __suppressedEx3) { System.Diagnostics.Debug.WriteLine($"[ProcessRunnerService] Non-fatal error ignored: {__suppressedEx3.Message}"); }
+        }
+
+        private static string PrependCmdEnvironmentAssignments(string rawCommandLine, IReadOnlyDictionary<string, string>? environmentVariables)
+        {
+            if (environmentVariables == null || environmentVariables.Count == 0)
+                return rawCommandLine;
+
+            var prefixes = new List<string>();
+            foreach (var kvp in environmentVariables)
+            {
+                if (string.IsNullOrWhiteSpace(kvp.Key) || kvp.Key.IndexOfAny(['=', '"', '&', '|', '<', '>', '\r', '\n']) >= 0)
+                    continue;
+                string val = (kvp.Value ?? "").Replace("\r", "").Replace("\n", "").Replace("\"", "");
+                prefixes.Add($"set \"{kvp.Key}={val}\"");
+            }
+            return prefixes.Count == 0 ? rawCommandLine : $"{string.Join(" && ", prefixes)} && {rawCommandLine}";
         }
 
         private bool ShouldEmitMilestone(double pct)

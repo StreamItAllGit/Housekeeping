@@ -6,8 +6,9 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Foundation.Core;
+using Housekeeping.Interop;
 using Housekeeping.Models;
-using Microsoft.Win32;
 
 namespace Housekeeping.Services
 {
@@ -29,37 +30,6 @@ namespace Housekeeping.Services
         public static readonly string HistoryFilePath = Path.Combine(AppDataDir, "history.json");
         public static readonly string LogsDir = Path.Combine(AppDataDir, "logs");
 
-        public static string ResolveDefaultDataDirectory(string baseDir)
-        {
-            if (string.IsNullOrWhiteSpace(baseDir))
-            {
-                return AppDomain.CurrentDomain.BaseDirectory;
-            }
-
-            try
-            {
-                string trimmed = Path.GetFullPath(baseDir)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                string folderName = Path.GetFileName(trimmed);
-                if (folderName.Equals("app", StringComparison.OrdinalIgnoreCase))
-                {
-                    DirectoryInfo? parent = Directory.GetParent(trimmed);
-                    if (parent != null && parent.Exists)
-                    {
-                        string dataDir = Path.Combine(parent.FullName, "data");
-                        MigrateLegacyRootStateIfPresent(parent.FullName, dataDir, out _);
-                        return dataDir;
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ConfigService] ResolveDefaultDataDirectory fallback: {ex.Message}");
-            }
-
-            return baseDir;
-        }
-
         public static readonly JsonSerializerOptions JsonOptions = new()
         {
             WriteIndented = true,
@@ -73,6 +43,12 @@ namespace Housekeeping.Services
         private readonly bool _isCustomConfigPath;
         private readonly bool _isCustomLogsDir;
         private string _lastSnapshotSha256 = "";
+
+        public SandboxResolution Sandbox { get; }
+        public bool IsSandboxActive => Sandbox.IsSandboxActive;
+        public bool IsStage1Isolated { get; }
+        public bool ShouldSuppressHostMutations => IsStage1Isolated;
+        public bool ShouldSuppressLiveHostMutations => IsStage1Isolated || Sandbox.IsSandboxActive;
 
         public string InstallRootDirectory { get; }
         public string DataDirectory { get; }
@@ -92,71 +68,20 @@ namespace Housekeeping.Services
             string? customLogsDir = null,
             bool isolatedOverride = false)
         {
-            string? resolvedConfigPath = customConfigFilePath;
-            if (string.IsNullOrWhiteSpace(resolvedConfigPath))
-            {
-                resolvedConfigPath = Environment.GetEnvironmentVariable("HOUSEKEEPING_CONFIG")
-                                     ?? Environment.GetEnvironmentVariable("CONFIG_PATH");
-            }
-            _isCustomConfigPath = !string.IsNullOrWhiteSpace(resolvedConfigPath);
+            ResolvedServicePaths resolved = ResolvePathsAndSandbox(customBaseDir, customConfigFilePath, customLogsDir, isolatedOverride);
+            Sandbox = resolved.Sandbox;
+            IsStage1Isolated = resolved.IsStage1Isolated;
+            IsIsolatedOverride = resolved.IsIsolatedOverride;
+            _isCustomBaseDir = resolved.IsCustomBaseDir;
+            _isCustomConfigPath = resolved.IsCustomConfigPath;
+            _isCustomLogsDir = resolved.IsCustomLogsDir;
 
-            string? resolvedBaseDir = customBaseDir;
-            if (string.IsNullOrWhiteSpace(resolvedBaseDir))
-            {
-                resolvedBaseDir = Environment.GetEnvironmentVariable("HOUSEKEEPING_DATA_DIR")
-                                  ?? Environment.GetEnvironmentVariable("DATA_DIR")
-                                  ?? Environment.GetEnvironmentVariable("HOUSEKEEPING_HOME")
-                                  ?? Environment.GetEnvironmentVariable("APP_HOME");
-            }
-
-            if (string.IsNullOrWhiteSpace(resolvedBaseDir) && _isCustomConfigPath)
-            {
-                resolvedBaseDir = Path.GetDirectoryName(Path.GetFullPath(resolvedConfigPath!));
-            }
-
-            _isCustomBaseDir = !string.IsNullOrWhiteSpace(resolvedBaseDir);
-            IsIsolatedOverride = isolatedOverride || _isCustomBaseDir || _isCustomConfigPath || _isCustomLogsDir || IsTruthyEnv("APP_ISOLATED_TEST");
-
-            string runtimeBase = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            bool runtimeInApp = string.Equals(Path.GetFileName(runtimeBase), "app", StringComparison.OrdinalIgnoreCase);
-            string defaultInstallRoot = runtimeInApp && Directory.GetParent(runtimeBase) is { } rParent
-                ? rParent.FullName
-                : runtimeBase;
-
-            if (_isCustomBaseDir)
-            {
-                string normCustom = Path.GetFullPath(resolvedBaseDir!)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                string customName = Path.GetFileName(normCustom);
-
-                if (customName.Equals("app", StringComparison.OrdinalIgnoreCase) &&
-                    Directory.GetParent(normCustom) is { } appParent && appParent.Exists &&
-                    (File.Exists(Path.Combine(appParent.FullName, "settings.json")) ||
-                     Directory.Exists(Path.Combine(appParent.FullName, "data"))))
-                {
-                    InstallRootDirectory = appParent.FullName;
-                    DataDirectory = Path.Combine(appParent.FullName, "data");
-                }
-                else if (customName.Equals("data", StringComparison.OrdinalIgnoreCase) &&
-                         Directory.GetParent(normCustom) is { } dataParent && dataParent.Exists)
-                {
-                    InstallRootDirectory = dataParent.FullName;
-                    DataDirectory = normCustom;
-                }
-                else
-                {
-                    InstallRootDirectory = normCustom;
-                    DataDirectory = normCustom;
-                }
-            }
-            else
-            {
-                InstallRootDirectory = defaultInstallRoot;
-                DataDirectory = runtimeInApp
-                    ? Path.Combine(InstallRootDirectory, "data")
-                    : AppDataDir;
-            }
+            InstallRootDirectory = resolved.InstallRootDirectory;
+            DataDirectory = resolved.DataDirectory;
+            ActiveConfigFilePath = resolved.ActiveConfigFilePath;
+            ActiveHistoryFilePath = resolved.ActiveHistoryFilePath;
+            ActiveLogsDir = resolved.ActiveLogsDir;
+            SnapshotsDir = resolved.SnapshotsDir;
 
             if (!_isCustomConfigPath &&
                 !string.Equals(
@@ -171,87 +96,20 @@ namespace Housekeeping.Services
                 }
             }
 
-            ActiveConfigFilePath = _isCustomConfigPath
-                ? Path.GetFullPath(resolvedConfigPath!)
-                : Path.Combine(DataDirectory, "settings.json");
-            ActiveHistoryFilePath = Path.Combine(DataDirectory, "history.json");
-
-            bool dataIsInstallRootData = string.Equals(
-                DataDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                Path.Combine(InstallRootDirectory, "data"),
-                StringComparison.OrdinalIgnoreCase);
-
-            string? resolvedLogsDir = customLogsDir;
-            if (string.IsNullOrWhiteSpace(resolvedLogsDir))
-            {
-                resolvedLogsDir = Environment.GetEnvironmentVariable("HOUSEKEEPING_LOG_DIR")
-                                  ?? Environment.GetEnvironmentVariable("LOG_DIR");
-            }
-            _isCustomLogsDir = !string.IsNullOrWhiteSpace(resolvedLogsDir);
-            ActiveLogsDir = _isCustomLogsDir
-                ? Path.GetFullPath(resolvedLogsDir!)
-                : (dataIsInstallRootData
-                    ? Path.Combine(InstallRootDirectory, "logs")
-                    : Path.Combine(DataDirectory, "logs"));
-
-            SnapshotsDir = dataIsInstallRootData
-                ? Path.Combine(InstallRootDirectory, "backups", "config_snapshots")
-                : Path.Combine(DataDirectory, "backups", "config_snapshots");
-
             Directory.CreateDirectory(DataDirectory);
             string? cfgParent = Path.GetDirectoryName(ActiveConfigFilePath);
             if (!string.IsNullOrWhiteSpace(cfgParent))
-            {
                 Directory.CreateDirectory(cfgParent);
-            }
             Directory.CreateDirectory(ActiveLogsDir);
             Directory.CreateDirectory(SnapshotsDir);
+            EnsureSettingsExampleCopied();
+            MediaInfoNativeResolver.ConfigureDataDirectory(DataDirectory);
+
             if (!_isCustomConfigPath)
-            {
                 TryAdoptParentCanonicalSettings(DataDirectory, ActiveConfigFilePath);
-            }
+
             Load();
             LoadHistory();
-        }
-
-        private void TryAdoptParentCanonicalSettings(string dataDir, string activeConfigPath)
-        {
-            try
-            {
-                string trimmed = Path.GetFullPath(dataDir)
-                    .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-                string folderName = Path.GetFileName(trimmed);
-                if (!folderName.Equals("app", StringComparison.OrdinalIgnoreCase) &&
-                    !folderName.Equals("data", StringComparison.OrdinalIgnoreCase))
-                {
-                    return;
-                }
-
-                DirectoryInfo? parent = Directory.GetParent(trimmed);
-                if (parent == null || !parent.Exists)
-                {
-                    return;
-                }
-
-                if (MigrateLegacyRootStateIfPresent(parent.FullName, trimmed, out string? migMsg) &&
-                    !string.IsNullOrWhiteSpace(migMsg))
-                {
-                    LastMigrationMessage = migMsg;
-                }
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ConfigService] TryAdoptParentCanonicalSettings ignored: {ex.Message}");
-            }
-        }
-
-        private static bool IsTruthyEnv(string name)
-        {
-            string? val = Environment.GetEnvironmentVariable(name);
-            return !string.IsNullOrWhiteSpace(val) &&
-                   (val.Equals("1", StringComparison.OrdinalIgnoreCase) ||
-                    val.Equals("true", StringComparison.OrdinalIgnoreCase) ||
-                    val.Equals("yes", StringComparison.OrdinalIgnoreCase));
         }
 
         public void Load()
@@ -547,7 +405,7 @@ namespace Housekeeping.Services
                 AtomicWriteAllText(ActiveConfigFilePath, json);
                 WriteRollingSnapshotLocked(json);
                 Config = candidate;
-                if (!IsIsolatedOverride)
+                if (!ShouldSuppressHostMutations)
                 {
                     ApplyWindowsStartupSetting(candidate.StartWithWindows);
                 }
@@ -915,28 +773,6 @@ namespace Housekeeping.Services
                 }
                 catch (System.Exception __suppressedEx12) { System.Diagnostics.Debug.WriteLine($"[ConfigService] Non-fatal error ignored: {__suppressedEx12.Message}"); }
             }
-        }
-
-        private static void ApplyWindowsStartupSetting(bool enable)
-        {
-            try
-            {
-                using var key = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true);
-                if (key == null) return;
-
-                const string appKey = "Housekeeping2";
-                if (enable)
-                {
-                    string exePath = Environment.ProcessPath ?? Path.Combine(AppDataDir, "Housekeeping.exe");
-                    key.SetValue(appKey, $"\"{exePath}\" --minimized");
-                }
-                else
-                {
-                    if (key.GetValue(appKey) != null)
-                        key.DeleteValue(appKey, false);
-                }
-            }
-            catch (System.Exception __suppressedEx13) { System.Diagnostics.Debug.WriteLine($"[ConfigService] Non-fatal error ignored: {__suppressedEx13.Message}"); }
         }
     }
 }

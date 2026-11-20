@@ -44,7 +44,21 @@ namespace Housekeeping.Services
 
     public static class CrashBundleExceptionFilter
     {
-        public const string DefaultFallbackVersion = "0.1.12-hf.1";
+        public const string DefaultFallbackVersion = "0.2.0";
+
+        private static readonly string[] DisconnectMessageMarkers =
+        {
+            "10054",
+            "forcibly closed",
+            "response ended prematurely",
+            "unable to read data from the transport connection",
+            "unable to write data to the transport connection",
+            "client reset the request stream",
+            "connection reset",
+            "connection aborted",
+            "broken pipe",
+            "operation was aborted"
+        };
 
         public static bool IsBenignBackgroundException(Exception? ex)
         {
@@ -67,37 +81,79 @@ namespace Housekeeping.Services
             return IsSingleLeafBenign(ex);
         }
 
+        public static string DescribeTransientDisconnect(Exception? ex)
+        {
+            if (ex == null) return "null";
+            Exception baseEx = ex.GetBaseException();
+            if (baseEx is SocketException sock)
+                return $"SocketException({sock.SocketErrorCode}/{(int)sock.SocketErrorCode})";
+            if (ex is HttpRequestException hre)
+                return $"HttpRequestException({hre.HttpRequestError})";
+            return baseEx.GetType().Name;
+        }
+
         private static bool IsSingleLeafBenign(Exception leaf)
         {
             if (leaf is OperationCanceledException)
                 return true;
 
-            if (leaf is IOException or HttpRequestException or SocketException)
+            if (leaf is SocketException directSock && IsDisconnectSocketError(directSock.SocketErrorCode))
+                return true;
+
+            if (leaf is HttpRequestException httpEx)
             {
-                if (TryFindInnerSocketException(leaf, out var sockEx) &&
-                    sockEx.SocketErrorCode is SocketError.ConnectionReset or SocketError.OperationAborted or SocketError.ConnectionAborted or SocketError.Shutdown)
+                if (HasBenignInnerCause(httpEx) ||
+                    httpEx.HttpRequestError is HttpRequestError.ConnectionError or HttpRequestError.ResponseEnded
+                        or HttpRequestError.ProxyTunnelError or HttpRequestError.NameResolutionError ||
+                    ContainsDisconnectMarker(httpEx.Message))
                 {
                     return true;
                 }
+            }
+
+            if (leaf is IOException ioEx &&
+                ioEx is not FileNotFoundException &&
+                ioEx is not DirectoryNotFoundException &&
+                ioEx is not DriveNotFoundException &&
+                ioEx is not PathTooLongException)
+            {
+                if (ioEx is HttpIOException || HasBenignInnerCause(ioEx) || ContainsDisconnectMarker(ioEx.Message))
+                    return true;
             }
 
             return false;
         }
 
-        private static bool TryFindInnerSocketException(Exception ex, out SocketException socketException)
+        private static bool HasBenignInnerCause(Exception ex)
         {
-            Exception? current = ex;
+            Exception? current = ex.InnerException;
             while (current != null)
             {
-                if (current is SocketException s)
-                {
-                    socketException = s;
+                if (current is OperationCanceledException or ObjectDisposedException or HttpIOException)
                     return true;
-                }
+                if (current is SocketException sock && IsDisconnectSocketError(sock.SocketErrorCode))
+                    return true;
+                if (current is AggregateException agg)
+                    return IsBenignBackgroundException(agg);
                 current = current.InnerException;
             }
+            return false;
+        }
 
-            socketException = null!;
+        private static bool IsDisconnectSocketError(SocketError code) => code is
+            SocketError.ConnectionReset or SocketError.OperationAborted or SocketError.ConnectionAborted or
+            SocketError.Shutdown or SocketError.Disconnecting or SocketError.TimedOut or
+            SocketError.NetworkReset or SocketError.NotConnected or SocketError.Interrupted or
+            SocketError.ConnectionRefused or SocketError.HostUnreachable or SocketError.NetworkUnreachable;
+
+        private static bool ContainsDisconnectMarker(string? message)
+        {
+            if (string.IsNullOrWhiteSpace(message)) return false;
+            foreach (string marker in DisconnectMessageMarkers)
+            {
+                if (message.Contains(marker, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
             return false;
         }
     }
