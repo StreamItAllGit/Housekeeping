@@ -1,0 +1,171 @@
+{
+  "folders": [
+    {
+      "name": "1. Housekeeping — Dev",
+      "path": "."
+    },
+    {
+      "name": "2. Housekeeping — Project Root",
+      "path": ".."
+    }
+  ],
+  "settings": {
+    "dotnet.defaultSolution": "Housekeeping.slnx",
+    "typescript.tsdk": "Housekeeping.Web/node_modules/typescript/lib",
+    "powershell.codeFormatting.preset": "OTBS",
+    "python.analysis.typeCheckingMode": "basic",
+    "files.eol": "\n",
+    "files.trimTrailingWhitespace": true,
+    "files.insertFinalNewline": true,
+    "files.exclude": {
+      "**/bin": true,
+      "**/obj": true,
+      "**/__pycache__": true,
+      "**/.pytest_cache": true,
+      "**/.cache": true,
+      "**/node_modules": true,
+      "**/[Dd]esktop.ini": true,
+      "**/[Tt]humbs.db": true,
+      "**/ehthumbs.db": true,
+      "**/.DS_Store": true
+    },
+    "search.exclude": {
+      "**/node_modules": true,
+      "**/bin": true,
+      "**/obj": true,
+      "Housekeeping.Server/wwwroot": true
+    },
+    "[csharp]": {
+      "editor.tabSize": 4,
+      "editor.insertSpaces": true
+    },
+    "[typescript]": {
+      "editor.tabSize": 2,
+      "editor.insertSpaces": true
+    },
+    "[typescriptreact]": {
+      "editor.tabSize": 2,
+      "editor.insertSpaces": true
+    },
+    "[json]": {
+      "editor.tabSize": 2,
+      "editor.insertSpaces": true
+    },
+    "[powershell]": {
+      "editor.tabSize": 4,
+      "editor.insertSpaces": true
+    },
+    "[python]": {
+      "editor.tabSize": 4,
+      "editor.insertSpaces": true
+    }
+  },
+  "tasks": {
+    "version": "2.0.0",
+    "tasks": [
+      {
+        "label": "Build Housekeeping.Web (SPA)",
+        "type": "shell",
+        "command": "npm",
+        "args": [
+          "--prefix",
+          "Housekeeping.Web",
+          "run",
+          "build"
+        ],
+        "group": {
+          "kind": "build",
+          "isDefault": false
+        }
+      },
+      {
+        "label": "Verify UI Hints & CSS",
+        "type": "shell",
+        "command": "node",
+        "args": [
+          "scripts/verify_ui_hints.mjs"
+        ],
+        "group": {
+          "kind": "test",
+          "isDefault": false
+        }
+      },
+      {
+        "label": "Build Housekeeping (.NET)",
+        "type": "shell",
+        "command": "dotnet",
+        "args": [
+          "build",
+          "Housekeeping.slnx",
+          "-c",
+          "Release",
+          "-p:TreatWarningsAsErrors=true",
+          "-nodeReuse:false"
+        ],
+        "group": {
+          "kind": "build",
+          "isDefault": true
+        },
+        "problemMatcher": "$msCompile"
+      },
+      {
+        "label": "Test Housekeeping (.NET Isolated)",
+        "type": "shell",
+        "command": "dotnet",
+        "args": [
+          "test",
+          "Housekeeping.slnx",
+          "-c",
+          "Release",
+          "-p:TreatWarningsAsErrors=true",
+          "-nodeReuse:false"
+        ],
+        "options": {
+          "env": {
+            "APP_ISOLATED_TEST": "1"
+          }
+        },
+        "group": {
+          "kind": "test",
+          "isDefault": true
+        }
+      },
+      {
+        "label": "Package Windows Installer & Release Bundle",
+        "type": "shell",
+        "command": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "scripts/build_installer.ps1"
+        ],
+        "group": {
+          "kind": "build",
+          "isDefault": false
+        }
+      },
+      {
+        "label": "Run Stage 2 4-Drive Sandbox E2E",
+        "type": "shell",
+        "command": "python",
+        "args": [
+          "scripts/run_stage2_e2e.py"
+        ],
+        "group": {
+          "kind": "test",
+          "isDefault": false
+        }
+      }
+    ]
+  },
+  "extensions": {
+    "recommendations": [
+      "ms-dotnettools.csdevkit",
+      "dbaeumer.vscode-eslint",
+      "ms-vscode.powershell",
+      "ms-python.python"
+    ]
+  }
+}

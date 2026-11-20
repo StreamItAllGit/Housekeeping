@@ -1,0 +1,342 @@
+name: Documentation Site (GitHub Pages)
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Install Markdown renderer
+        run: python -m pip install --upgrade pip && pip install markdown
+
+      - name: Build static documentation site
+        env:
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import html
+          import os
+          from pathlib import Path
+          import posixpath
+          import re
+          import shutil
+          import markdown
+
+          ROOT = Path(".").resolve()
+          SITE = ROOT / "_site"
+          if SITE.exists():
+              shutil.rmtree(SITE)
+          SITE.mkdir(parents=True, exist_ok=True)
+          (SITE / ".nojekyll").write_text("", encoding="utf-8")
+
+          base_path = os.environ.get("PAGES_BASE_PATH", "/Housekeeping").rstrip("/")
+          origin = (os.environ.get("PAGES_ORIGIN") or "https://streamitallgit.github.io").rstrip("/")
+          repo_slug = os.environ.get("GITHUB_REPOSITORY") or "StreamItAllGit/Housekeeping"
+          branch = os.environ.get("GITHUB_REF_NAME") or "main"
+          repo_url = f"https://github.com/{repo_slug}"
+          releases_url = f"{repo_url}/releases"
+          site_root_url = f"{origin}{base_path}"
+
+          assets_dst = SITE / "assets"
+          assets_dst.mkdir(parents=True, exist_ok=True)
+          for src_dir in (ROOT / "Dev" / "Housekeeping.DesktopHost" / "Assets", ROOT / "Dev" / "Housekeeping.Web" / "public"):
+              if src_dir.is_dir():
+                  for item in src_dir.iterdir():
+                      if item.is_file() and item.suffix.lower() in {".png", ".ico", ".svg"}:
+                          dst_item = assets_dst / item.name
+                          if not dst_item.exists():
+                              shutil.copy2(item, dst_item)
+
+          icon_href = "./assets/app_icon.png" if (assets_dst / "app_icon.png").exists() else ("./assets/icon-192.png" if (assets_dst / "icon-192.png").exists() else "./assets/favicon.ico")
+          logo_href = "./assets/app_icon.png" if (assets_dst / "app_icon.png").exists() else icon_href
+
+          pages: list[dict] = []
+          def register(src_rel: str, out_name: str, label: str, group: str, desc: str) -> None:
+              src_path = ROOT / src_rel
+              if src_path.is_file():
+                  pages.append({"src": src_path, "src_rel": src_rel, "out": out_name, "label": label, "group": group, "desc": desc})
+
+          register("README.md", "index.html", "Overview", "Overview", "Housekeeping automated media workstation, bit-rot auditor, and cloud sync companion.")
+          register("FEATURES.md", "features.html", "Features", "Overview", "Implemented modules, parity matrix, and feature index for Housekeeping.")
+          register("ROADMAP.md", "roadmap.html", "Roadmap", "Overview", "Active milestones and release horizon for Housekeeping.")
+          register("CHANGELOG.md", "changelog.html", "Changelog", "Overview", "Release history and version changelog for Housekeeping.")
+          register("SECURITY.md", "security.html", "Security", "Overview", "Security boundaries, containment guarantees, and vulnerability reporting.")
+          register("CONTRIBUTING.md", "contributing.html", "Contributing", "Overview", "Build prerequisites, SDK setup, testing commands, and PR guidelines.")
+
+          docs_dir = ROOT / "Dev" / "docs"
+          if docs_dir.is_dir():
+              preferred = ["USER_GUIDE.md", "ARCHITECTURE.md", "INTERFACES.md", "OPERATIONS.md"]
+              flat_docs = [p for p in sorted(docs_dir.glob("*.md")) if p.is_file()]
+              ordered_docs = [docs_dir / n for n in preferred if (docs_dir / n).is_file()]
+              ordered_docs.extend(p for p in flat_docs if p.name not in preferred)
+              for doc_p in ordered_docs:
+                  slug = re.sub(r"[^a-z0-9]+", "-", doc_p.stem.lower()).strip("-")
+                  label = doc_p.stem.replace("_", " ").replace(".", " — ").title()
+                  register(f"Dev/docs/{doc_p.name}", f"docs-{slug}.html", label, "Manuals", f"Housekeeping {label} documentation.")
+
+          link_map: dict[str, str] = {}
+          for p in pages:
+              norm = p["src_rel"].replace("\\", "/")
+              link_map[norm.lower()] = p["out"]
+              link_map[Path(norm).name.lower()] = p["out"]
+
+          def convert_alerts(md_text: str) -> str:
+              lines = md_text.splitlines()
+              out: list[str] = []
+              i = 0
+              while i < len(lines):
+                  m = re.match(r"^\s*>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(.*)$", lines[i], re.IGNORECASE)
+                  if m:
+                      kind = m.group(1).lower()
+                      first = m.group(2).strip()
+                      body_lines = [first] if first else []
+                      i += 1
+                      while i < len(lines) and lines[i].lstrip().startswith(">"):
+                          body_lines.append(re.sub(r"^\s*>\s?", "", lines[i]))
+                          i += 1
+                      out.append(f'<div class="callout callout-{kind}"><div class="callout-title">{kind.upper()}</div>')
+                      out.append("\n".join(body_lines))
+                      out.append("</div>\n")
+                      continue
+                  out.append(lines[i])
+                  i += 1
+              return "\n".join(out)
+
+          def rewrite_links(raw_md: str, src_rel: str) -> str:
+              file_uri_pat = "(?i)" + "file" + r":///[A-Za-z]:/[^)\s\"'>]+"
+              cleaned = re.sub(file_uri_pat, "./", raw_md)
+              src_dir = posixpath.dirname(src_rel.replace("\\", "/"))
+              def _repl(match: re.Match[str]) -> str:
+                  prefix, target, suffix = match.group(1), match.group(2), match.group(3)
+                  if target.startswith(("http://", "https://", "mailto:", "#")):
+                      return match.group(0)
+                  path_part, _, frag = target.partition("#")
+                  resolved_rel = posixpath.normpath(posixpath.join(src_dir, path_part.replace("\\", "/"))) if src_dir else posixpath.normpath(path_part.replace("\\", "/"))
+                  resolved_rel = resolved_rel.lstrip("./")
+                  key = resolved_rel.lower()
+                  mapped = link_map.get(key) or link_map.get(Path(key).name.lower())
+                  if mapped:
+                      dest = f"./{mapped}" + (f"#{frag}" if frag else "")
+                      return f"{prefix}{dest}{suffix}"
+                  if resolved_rel.startswith("Dev/Housekeeping.DesktopHost/Assets/") or resolved_rel.startswith("Dev/Housekeeping.Web/public/"):
+                      return f"{prefix}./assets/{Path(resolved_rel).name}{suffix}"
+                  if not resolved_rel.startswith(".."):
+                      dest = f"{repo_url}/blob/{branch}/{resolved_rel}" + (f"#{frag}" if frag else "")
+                      return f"{prefix}{dest}{suffix}"
+                  return match.group(0)
+              cleaned = re.sub(r"(\]\()([^)\s]+)(\))", _repl, cleaned)
+              cleaned = re.sub(r'src="Dev/Housekeeping\.DesktopHost/Assets/([^"]+)"', r'src="./assets/\1"', cleaned)
+              cleaned = re.sub(r'src="Dev/Housekeeping\.Web/public/([^"]+)"', r'src="./assets/\1"', cleaned)
+              return cleaned
+
+          CSS = """
+          :root {
+            color-scheme: dark light;
+            --bg: #0e0e10; --surface: #18181b; --surface-2: #11151d; --border: #27272a;
+            --text: #eceff4; --muted: #94a3b8; --accent: #f59e0b; --accent-soft: rgba(245,158,11,.14);
+            --code-bg: #111318;
+          }
+          [data-theme="light"] {
+            --bg: #f8fafc; --surface: #ffffff; --surface-2: #f1f5f9; --border: #cbd5e1;
+            --text: #0f172a; --muted: #475569; --accent: #d97706; --accent-soft: rgba(217,119,6,.12);
+            --code-bg: #f1f5f9;
+          }
+          @media (prefers-color-scheme: light) {
+            :root:not([data-theme="dark"]) {
+              --bg: #f8fafc; --surface: #ffffff; --surface-2: #f1f5f9; --border: #cbd5e1;
+              --text: #0f172a; --muted: #475569; --accent: #d97706; --accent-soft: rgba(217,119,6,.12);
+              --code-bg: #f1f5f9;
+            }
+          }
+          * { box-sizing: border-box; }
+          body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.65; }
+          .skip-link { position: absolute; left: -9999px; top: 8px; background: var(--accent); color: #1f1300; padding: 8px 12px; border-radius: 6px; font-weight: 600; z-index: 999; }
+          .skip-link:focus { left: 12px; }
+          .topbar { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); }
+          .brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.05rem; }
+          .brand img { width: 28px; height: 28px; border-radius: 6px; }
+          .top-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+          .top-actions a, .theme-btn, .menu-btn { color: var(--text); text-decoration: none; font-size: .9rem; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; }
+          .top-actions a:hover, .theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+          .menu-btn { display: none; }
+          .shell { display: grid; grid-template-columns: 250px minmax(0, 1fr) 230px; max-width: 1440px; margin: 0 auto; gap: 24px; padding: 24px 20px; }
+          .sidebar, .toc-pane { position: sticky; top: 72px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+          .nav-group { margin: 0 0 14px; }
+          .nav-heading { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 6px; }
+          .nav-link { display: block; padding: 6px 10px; border-radius: 6px; color: var(--text); text-decoration: none; font-size: .92rem; }
+          .nav-link:hover { background: var(--surface-2); }
+          .nav-link.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+          .content { min-width: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 28px 32px; }
+          .content a { color: var(--accent); }
+          .content h1, .content h2, .content h3 { line-height: 1.25; scroll-margin-top: 80px; }
+          .content table { width: 100%; border-collapse: collapse; margin: 16px 0; display: block; overflow-x: auto; }
+          .content th, .content td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+          .content th { background: var(--surface-2); }
+          .content pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px; overflow-x: auto; }
+          .content code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .9em; }
+          .content blockquote { border-left: 3px solid var(--accent); margin: 12px 0; padding: 4px 14px; color: var(--muted); }
+          .callout { border: 1px solid var(--border); border-left: 4px solid var(--accent); background: var(--surface-2); border-radius: 8px; padding: 12px 16px; margin: 16px 0; }
+          .callout-warning, .callout-caution { border-left-color: #ef4444; }
+          .callout-title { font-size: .78rem; font-weight: 700; letter-spacing: .05em; color: var(--accent); margin-bottom: 4px; }
+          .toc-pane ul { list-style: none; padding-left: 10px; margin: 4px 0; }
+          .toc-pane a { color: var(--muted); text-decoration: none; font-size: .86rem; display: block; padding: 3px 0; }
+          .toc-pane a:hover { color: var(--accent); }
+          .footer { max-width: 1440px; margin: 0 auto 28px; padding: 16px 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: .88rem; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+          .footer a { color: var(--accent); text-decoration: none; }
+          @media (max-width: 1100px) { .shell { grid-template-columns: 240px minmax(0, 1fr); } .toc-pane { display: none; } }
+          @media (max-width: 800px) {
+            .menu-btn { display: inline-block; }
+            .shell { grid-template-columns: 1fr; }
+            .sidebar { display: none; position: static; max-height: none; }
+            .sidebar.open { display: block; }
+            .content { padding: 20px 18px; }
+          }
+          """
+
+          def build_sidebar(active_out: str, prefix: str) -> str:
+              parts = []
+              for grp in ("Overview", "Manuals"):
+                  items = [p for p in pages if p["group"] == grp]
+                  if not items:
+                      continue
+                  links = []
+                  for item in items:
+                      cls = "nav-link active" if item["out"] == active_out else "nav-link"
+                      links.append(f'<a class="{cls}" href="{prefix}{item["out"]}">{html.escape(item["label"])}</a>')
+                  parts.append(f'<div class="nav-group"><div class="nav-heading">{html.escape(grp)}</div>{"".join(links)}</div>')
+              return "".join(parts)
+
+          def render_shell(title: str, desc: str, canonical: str, body_html: str, toc_html: str, active_out: str, prefix: str = "./", has_mermaid: bool = False) -> str:
+              sidebar = build_sidebar(active_out, prefix)
+              toc_block = f'<aside class="toc-pane" aria-label="On this page"><div class="nav-heading">On This Page</div>{toc_html}</aside>' if toc_html.strip() else ""
+              mermaid_script = (
+                  '<script type="module">'
+                  'import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";'
+                  'const light = document.documentElement.dataset.theme === "light" || (!document.documentElement.dataset.theme && window.matchMedia("(prefers-color-scheme: light)").matches);'
+                  'mermaid.initialize({ startOnLoad: true, theme: light ? "default" : "dark" });'
+                  '</script>'
+              ) if has_mermaid else ""
+              ico = icon_href if prefix == "./" else icon_href.replace("./", prefix, 1)
+              logo = logo_href if prefix == "./" else logo_href.replace("./", prefix, 1)
+              return f"""<!doctype html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width, initial-scale=1" />
+            <title>{html.escape(title)} — Housekeeping Docs</title>
+            <meta name="description" content="{html.escape(desc)}" />
+            <link rel="canonical" href="{html.escape(canonical)}" />
+            <meta property="og:title" content="{html.escape(title)} — Housekeeping" />
+            <meta property="og:description" content="{html.escape(desc)}" />
+            <meta property="og:type" content="website" />
+            <meta property="og:url" content="{html.escape(canonical)}" />
+            <link rel="icon" href="{html.escape(ico)}" />
+            <style>{CSS}</style>
+            <script>
+              const saved = localStorage.getItem("hk_docs_theme");
+              if (saved === "light" || saved === "dark") document.documentElement.dataset.theme = saved;
+            </script>
+          </head>
+          <body>
+            <a class="skip-link" href="#mainContent">Skip to content</a>
+            <header class="topbar">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <button class="menu-btn" type="button" onclick="document.getElementById('docsSidebar').classList.toggle('open')">Menu</button>
+                <a class="brand" href="{prefix}index.html"><img src="{html.escape(logo)}" alt="Housekeeping Logo" /><span>Housekeeping</span></a>
+              </div>
+              <nav class="top-actions" aria-label="Primary links">
+                <a href="{prefix}docs-user-guide.html">User Guide</a>
+                <a href="{html.escape(releases_url)}">Releases</a>
+                <a href="{html.escape(repo_url)}">GitHub</a>
+                <button class="theme-btn" type="button" onclick="const d=document.documentElement;const next=d.dataset.theme==='light'?'dark':'light';d.dataset.theme=next;localStorage.setItem('hk_docs_theme',next);">Theme</button>
+              </nav>
+            </header>
+            <div class="shell">
+              <aside id="docsSidebar" class="sidebar" aria-label="Documentation navigation">{sidebar}</aside>
+              <main id="mainContent" class="content">{body_html}</main>
+              {toc_block}
+            </div>
+            <footer class="footer">
+              <span>Housekeeping — Mozilla Public License 2.0 (MPL-2.0)</span>
+              <span><a href="{html.escape(repo_url)}">Repository</a> · <a href="{html.escape(releases_url)}">Releases</a> · <a href="{prefix}contributing.html">Contributing</a> · <a href="{prefix}security.html">Security</a></span>
+            </footer>
+            {mermaid_script}
+          </body>
+          </html>"""
+
+          sitemap_urls: list[str] = []
+          for p in pages:
+              raw_md = p["src"].read_text(encoding="utf-8")
+              prepped = convert_alerts(rewrite_links(raw_md, p["src_rel"]))
+              md = markdown.Markdown(extensions=["tables", "fenced_code", "toc", "attr_list", "sane_lists"])
+              html_body = md.convert(prepped)
+              has_mermaid = "language-mermaid" in html_body
+              html_body = re.sub(
+                  r'<pre><code class="language-mermaid">(.*?)</code></pre>',
+                  lambda m: f'<pre class="mermaid">{m.group(1)}</pre>',
+                  html_body,
+                  flags=re.DOTALL,
+              )
+              canon = f"{site_root_url}/" if p["out"] == "index.html" else f"{site_root_url}/{p['out']}"
+              sitemap_urls.append(canon)
+              full_html = render_shell(p["label"], p["desc"], canon, html_body, md.toc, p["out"], prefix="./", has_mermaid=has_mermaid)
+              (SITE / p["out"]).write_text(full_html, encoding="utf-8")
+
+          abs_prefix = f"{base_path}/" if base_path else "/"
+          not_found_body = f"<h1>404 — Page Not Found</h1><p>The documentation page you requested does not exist or moved.</p><p><a href='{abs_prefix}index.html'>Return to Housekeeping Overview</a> or open the <a href='{abs_prefix}docs-user-guide.html'>User Guide</a>.</p>"
+          (SITE / "404.html").write_text(
+              render_shell("Page Not Found", "Housekeeping documentation 404 page.", f"{site_root_url}/404.html", not_found_body, "", "", prefix=abs_prefix),
+              encoding="utf-8",
+          )
+          (SITE / "robots.txt").write_text(f"User-agent: *\nAllow: /\nSitemap: {site_root_url}/sitemap.xml\n", encoding="utf-8")
+          now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+          sm_entries = "".join(f"<url><loc>{html.escape(u)}</loc><lastmod>{now_iso}</lastmod></url>" for u in sitemap_urls)
+          (SITE / "sitemap.xml").write_text(f'<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{sm_entries}</urlset>\n', encoding="utf-8")
+          print(f"Generated {len(pages)} documentation pages in {SITE}")
+          PY
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    if: github.event.repository.visibility == 'public'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

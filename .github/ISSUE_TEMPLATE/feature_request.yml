@@ -1,0 +1,32 @@
+name: Feature Request
+description: Propose a new capability, pipeline module enhancement, or operational improvement for Housekeeping
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: target_area
+    attributes:
+      label: Target Area
+      options:
+        - Pipeline Engine & Queues
+        - Media Processing (Modules 1-3)
+        - Game Launchers & Manifests (Modules 4 & 8)
+        - Cloud Sync, Humble & Scripts (Modules 5-7)
+        - Web UI, Mobile PWA & Tailscale QR
+        - Suite Integration, CLI & Installer
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Statement
+      description: What workflow gap or operational friction should Housekeeping address?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed Behavior
+      description: Suggested UI controls, CLI flags, API endpoints, or configuration options.
+    validations:
+      required: true

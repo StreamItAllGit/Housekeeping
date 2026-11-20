@@ -1,0 +1,82 @@
+name: CI Build & Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    env:
+      APP_ISOLATED_TEST: "1"
+      FOUNDATION_SUPPRESS_MODALS: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: Dev/Housekeeping.Web/package-lock.json
+
+      - name: Acquire pinned Foundation SDK (v0.5.3 with v0.5.2 fallback)
+        shell: pwsh
+        run: |
+          $sdkVer = "0.5.3"
+          if (Test-Path -LiteralPath "Dev/suite.manifest.json") {
+            $manifest = Get-Content -LiteralPath "Dev/suite.manifest.json" -Raw | ConvertFrom-Json
+            if (-not [string]::IsNullOrWhiteSpace([string]$manifest.sdkVersion)) {
+              $sdkVer = ([string]$manifest.sdkVersion).Trim().TrimStart('v', 'V')
+            }
+          }
+
+          $tmpZip = Join-Path $env:RUNNER_TEMP "Foundation-sdk.zip"
+          $tmpSdk = Join-Path $env:RUNNER_TEMP "FoundationSdk"
+          $primaryUrl = "https://github.com/StreamItAllGit/Foundation/releases/download/v$sdkVer/Foundation-v$sdkVer.zip"
+          try {
+            Write-Host "Fetching Foundation SDK v$sdkVer from $primaryUrl..."
+            Invoke-WebRequest -Uri $primaryUrl -OutFile $tmpZip -UseBasicParsing
+          } catch {
+            if ($sdkVer -eq "0.5.2") { throw }
+            Write-Warning "Foundation SDK v$sdkVer unavailable upstream ($($_.Exception.Message)); falling back to v0.5.2."
+            $fallbackUrl = "https://github.com/StreamItAllGit/Foundation/releases/download/v0.5.2/Foundation-v0.5.2.zip"
+            Invoke-WebRequest -Uri $fallbackUrl -OutFile $tmpZip -UseBasicParsing
+          }
+
+          if (Test-Path $tmpSdk) { Remove-Item $tmpSdk -Recurse -Force }
+          Expand-Archive -Path $tmpZip -DestinationPath $tmpSdk -Force
+          New-Item -ItemType Directory -Path "Dev/lib" -Force | Out-Null
+          Copy-Item (Join-Path $tmpSdk "Foundation.*") "Dev/lib/" -Force
+          foreach ($subName in @("WebAssets", "foundation_core")) {
+            $subPath = Join-Path $tmpSdk $subName
+            if (Test-Path $subPath) { Copy-Item $subPath "Dev/lib/" -Recurse -Force }
+          }
+          if (Test-Path (Join-Path $tmpSdk "sdk-manifest.json")) {
+            Copy-Item (Join-Path $tmpSdk "sdk-manifest.json") "Dev/lib/sdk-manifest.json" -Force
+          }
+
+      - name: Install, typecheck & build Housekeeping.Web SPA
+        run: |
+          npm --prefix Dev/Housekeeping.Web ci
+          npx --prefix Dev/Housekeeping.Web tsc --noEmit
+          npm --prefix Dev/Housekeeping.Web run build
+
+      - name: Verify UI 2-line hover hints & CSS parity
+        run: node Dev/scripts/verify_ui_hints.mjs
+
+      - name: Build Housekeeping.slnx (Release, zero warnings)
+        run: dotnet build Dev/Housekeeping.slnx -c Release -p:TreatWarningsAsErrors=true -nodeReuse:false
+
+      - name: Run isolated xUnit tests (APP_ISOLATED_TEST=1)
+        run: dotnet test Dev/Housekeeping.slnx -c Release -p:TreatWarningsAsErrors=true --no-build -nodeReuse:false --logger "console;verbosity=normal"
