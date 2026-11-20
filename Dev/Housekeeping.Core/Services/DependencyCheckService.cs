@@ -1,7 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Foundation.Core;
+using Housekeeping.Interop;
 using Housekeeping.Models;
 
 namespace Housekeeping.Services
@@ -22,19 +27,24 @@ namespace Housekeeping.Services
         public string ActiveToolsDir { get; }
 
         private readonly Func<AppConfig> _getConfig;
+        private readonly string? _explicitDataDirectory;
+        private readonly bool _isolatedOverride;
         private readonly object _rcloneCacheLock = new();
         private List<string> _cachedRcloneRemotes = new();
         private bool _hasCachedRcloneRemotes = false;
         private int _rcloneRefreshInFlight = 0;
 
-        public DependencyCheckService(Func<AppConfig> getConfig, string? customBaseDirectory = null)
+        public DependencyCheckService(Func<AppConfig> getConfig, string? customBaseDirectory = null, bool isolatedOverride = false)
         {
             _getConfig = getConfig;
-            string root = string.IsNullOrWhiteSpace(customBaseDirectory)
-                ? AppDomain.CurrentDomain.BaseDirectory
-                : Path.GetFullPath(customBaseDirectory);
+            _isolatedOverride = isolatedOverride;
+            _explicitDataDirectory = string.IsNullOrWhiteSpace(customBaseDirectory) ? null : Path.GetFullPath(customBaseDirectory);
+            string root = _explicitDataDirectory ?? AppDomain.CurrentDomain.BaseDirectory;
             ActiveToolsDir = Path.Combine(root, "tools");
-            EnsureToolsDirectoryExists(ActiveToolsDir);
+            SandboxResolution sandbox = SandboxEnvironmentSeam.ResolveCurrent();
+            if (!sandbox.IsSandboxActive || SandboxEnvironmentSeam.IsPathWithinSandbox(ActiveToolsDir, sandbox))
+                EnsureToolsDirectoryExists(ActiveToolsDir);
+            MediaInfoNativeResolver.ConfigureDataDirectory(_explicitDataDirectory);
         }
 
         public bool HasCachedRcloneRemotes
@@ -67,9 +77,9 @@ namespace Housekeeping.Services
         /// <summary>
         /// Runs 'rclone listremotes' off the UI thread and updates the in-memory cache.
         /// </summary>
-        public async System.Threading.Tasks.Task<List<string>> RefreshRcloneRemotesAsync(Action<List<string>>? onCompleted = null)
+        public async Task<List<string>> RefreshRcloneRemotesAsync(Action<List<string>>? onCompleted = null)
         {
-            if (System.Threading.Interlocked.Exchange(ref _rcloneRefreshInFlight, 1) == 1)
+            if (Interlocked.Exchange(ref _rcloneRefreshInFlight, 1) == 1)
             {
                 lock (_rcloneCacheLock)
                     return new List<string>(_cachedRcloneRemotes);
@@ -77,7 +87,7 @@ namespace Housekeeping.Services
 
             try
             {
-                var fresh = await System.Threading.Tasks.Task.Run(() => GetAvailableRcloneRemotes()).ConfigureAwait(false);
+                var fresh = await GetAvailableRcloneRemotesAsync().ConfigureAwait(false);
                 lock (_rcloneCacheLock)
                 {
                     _cachedRcloneRemotes = new List<string>(fresh);
@@ -88,7 +98,7 @@ namespace Housekeeping.Services
             }
             finally
             {
-                System.Threading.Interlocked.Exchange(ref _rcloneRefreshInFlight, 0);
+                Interlocked.Exchange(ref _rcloneRefreshInFlight, 0);
             }
         }
 
@@ -110,7 +120,7 @@ namespace Housekeeping.Services
                         "  - 7z.exe + 7z.dll    (Used by Game Launchers)",
                         "  - rclone.exe         (Used by Cloud Sync)",
                         "  - hbd.exe            (Used by Humble Library)",
-                        "  - MediaInfo.dll      (Bundled in app root; used by Media Transcoder)"
+                        "  - MediaInfo.dll      (Resolved from app\\, app\\tools\\, data\\tools\\, or system MediaInfo; used by Media Transcoder)"
                     });
                 }
             }
@@ -144,7 +154,10 @@ namespace Housekeeping.Services
                 Array.Empty<string>()).resolvedPath;
         }
 
-        public List<string> GetAvailableRcloneRemotes()
+        public List<string> GetAvailableRcloneRemotes() =>
+            Task.Run(() => GetAvailableRcloneRemotesAsync()).GetAwaiter().GetResult();
+
+        public async Task<List<string>> GetAvailableRcloneRemotesAsync(CancellationToken ct = default)
         {
             var remotes = new List<string>();
             string rcloneExe = ResolveRclone();
@@ -153,37 +166,73 @@ namespace Housekeeping.Services
 
             try
             {
-                var psi = new System.Diagnostics.ProcessStartInfo
+                bool forceContainment = _isolatedOverride || IsNonDefaultDataDirectory(_explicitDataDirectory);
+                var containment = RcloneContainmentHelper.ResolveContainment(_explicitDataDirectory, forceContainment);
+                if (containment.IsContained)
+                    RcloneContainmentHelper.EnsureContainmentDirectories(containment);
+
+                string args = containment.IsContained
+                    ? $"listremotes --config \"{containment.ConfigFilePath}\" --cache-dir \"{containment.CacheDir}\""
+                    : "listremotes";
+
+                var psi = new ProcessStartInfo
                 {
                     FileName = rcloneExe,
-                    Arguments = "listremotes",
+                    Arguments = args,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true
                 };
-
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
+                if (containment.IsContained)
                 {
-                    string output = proc.StandardOutput.ReadToEnd();
-                    proc.WaitForExit(3000);
+                    foreach (var kv in RcloneContainmentHelper.BuildEnvironmentVariables(containment))
+                        psi.Environment[kv.Key] = kv.Value;
+                }
+
+                using var proc = Process.Start(psi);
+                if (proc == null)
+                    return remotes;
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(3000);
+                Task<string> stdOutTask = proc.StandardOutput.ReadToEndAsync(timeoutCts.Token);
+                Task<string> stdErrTask = proc.StandardError.ReadToEndAsync(timeoutCts.Token);
+
+                try
+                {
+                    await proc.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+                    string output = await stdOutTask.ConfigureAwait(false);
+                    _ = await stdErrTask.ConfigureAwait(false);
                     if (proc.ExitCode == 0 && !string.IsNullOrWhiteSpace(output))
                     {
                         var lines = output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                         foreach (var line in lines)
                         {
                             if (!string.IsNullOrWhiteSpace(line))
-                            {
                                 remotes.Add(line.EndsWith(':') ? line : line + ":");
-                            }
                         }
                     }
                 }
+                catch (OperationCanceledException)
+                {
+                    try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { /* best-effort kill on timeout */ }
+                }
             }
-            catch (System.Exception __suppressedEx2) { System.Diagnostics.Debug.WriteLine($"[DependencyCheckService] Non-fatal error ignored: {__suppressedEx2.Message}"); }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DependencyCheckService] Non-fatal error ignored: {ex.Message}");
+            }
 
             return remotes;
+        }
+
+        private static bool IsNonDefaultDataDirectory(string? explicitDataDir)
+        {
+            if (string.IsNullOrWhiteSpace(explicitDataDir)) return false;
+            string normExplicit = Path.GetFullPath(explicitDataDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string normDefault = Path.GetFullPath(ConfigService.AppDataDir).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return !string.Equals(normExplicit, normDefault, StringComparison.OrdinalIgnoreCase);
         }
 
         public string ResolveHumbleDownloader()
@@ -240,17 +289,17 @@ namespace Housekeeping.Services
                 ResolvedPath = hbd.resolvedPath
             });
 
-            string appRootMediaInfo = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "MediaInfo.dll");
-            string activeToolsMediaInfo = Path.Combine(ActiveToolsDir, "MediaInfo.dll");
-            string toolsMediaInfo = Path.Combine(PortableToolsDir, "MediaInfo.dll");
-            bool miFound = File.Exists(appRootMediaInfo) || File.Exists(activeToolsMediaInfo) || File.Exists(toolsMediaInfo);
+            ToolResolutionResult miRes = MediaInfoNativeResolver.Resolve(_explicitDataDirectory);
+            bool miLoadable = MediaInfoNativeResolver.TryVerifyLoadable(_explicitDataDirectory, null, out _, out string? miResolvedPath);
             list.Add(new DependencyStatusItem
             {
                 ToolName = "MediaInfo.dll",
                 Description = "Source video resolution, HEVC codec & audio language track inspector",
-                IsAvailable = miFound,
-                SourceLabel = File.Exists(appRootMediaInfo) ? "Bundled (App Root)" : ((File.Exists(activeToolsMediaInfo) || File.Exists(toolsMediaInfo)) ? "./tools/" : "Missing"),
-                ResolvedPath = File.Exists(appRootMediaInfo) ? appRootMediaInfo : (File.Exists(activeToolsMediaInfo) ? activeToolsMediaInfo : (File.Exists(toolsMediaInfo) ? toolsMediaInfo : "MediaInfo.dll"))
+                IsAvailable = miLoadable,
+                SourceLabel = miLoadable
+                    ? (miRes.Source == ToolResolutionSource.BundledAppTools ? "Bundled / Tools" : miRes.Source.ToString())
+                    : (miRes.IsAvailable ? "Load Failed" : "Missing"),
+                ResolvedPath = miResolvedPath ?? "MediaInfo.dll"
             });
 
             return list;

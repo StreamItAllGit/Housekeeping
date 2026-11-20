@@ -29,7 +29,15 @@ namespace Housekeeping.Services.Modules
 
             var lines = new List<string>();
             string rcloneExe = ctx.Dependencies.ResolveRclone();
-            var (preSyncCmds, postSyncCmds) = cfg.ResolveAllSyncCommands(rcloneExe, col);
+            var containment = RcloneContainmentHelper.ResolveContainment(ctx.ConfigService.DataDirectory, ctx.ConfigService.IsIsolatedOverride);
+            var (preSyncCmds, postSyncCmds) = cfg.ResolveAllSyncCommands(rcloneExe, col, ctx.ConfigService.DataDirectory, ctx.ConfigService.IsIsolatedOverride);
+
+            if (cfg.EnablePrePostLaunchSyncCommands && (preSyncCmds.Count > 0 || postSyncCmds.Count > 0) && containment.IsContained)
+            {
+                RcloneContainmentHelper.EnsureContainmentDirectories(containment);
+                lines.Add($"set \"RCLONE_CONFIG={containment.ConfigFilePath}\"");
+                lines.Add($"set \"RCLONE_CACHE_DIR={containment.CacheDir}\"");
+            }
 
             if (cfg.EnablePrePostLaunchSyncCommands && preSyncCmds.Count > 0)
                 lines.AddRange(preSyncCmds);

@@ -5,7 +5,6 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Sockets;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Housekeeping.Models;
@@ -15,58 +14,6 @@ namespace Housekeeping.Services
     public partial class RemoteNodeDeploymentService
     {
         private static readonly ConcurrentDictionary<string, DateTime> _offlineUncCooldownUntilUtc = new(StringComparer.OrdinalIgnoreCase);
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _uncSingleFlightGates = new(StringComparer.OrdinalIgnoreCase);
-
-        public static async Task<T> RunBoundedUncOperationAsync<T>(
-            string? targetUncPath,
-            Func<T> syncOperation,
-            T fallbackOnTimeoutOrBusy,
-            int timeoutMs = 1800,
-            int cooldownSeconds = 20,
-            CancellationToken ct = default)
-        {
-            string key = string.IsNullOrWhiteSpace(targetUncPath) ? "__empty__" : targetUncPath.Trim();
-            bool isUnc = key.StartsWith(@"\\", StringComparison.Ordinal);
-
-            if (!isUnc)
-                return await Task.Run(syncOperation, ct).ConfigureAwait(false);
-
-            string cooldownKey = $"UNC_OP|{key}";
-            if (_offlineUncCooldownUntilUtc.TryGetValue(cooldownKey, out var blockedUntil) && DateTime.UtcNow < blockedUntil)
-                return fallbackOnTimeoutOrBusy;
-
-            var gate = _uncSingleFlightGates.GetOrAdd(cooldownKey, _ => new SemaphoreSlim(1, 1));
-            if (!gate.Wait(0))
-                return fallbackOnTimeoutOrBusy;
-
-            Task<T> workerTask = Task.Factory.StartNew(
-                () =>
-                {
-                    try { return syncOperation(); }
-                    finally
-                    {
-                        try { gate.Release(); }
-                        catch (Exception ex) { Debug.WriteLine($"[RemoteNodeDeploymentService] Gate release ignored: {ex.Message}"); }
-                    }
-                },
-                CancellationToken.None,
-                TaskCreationOptions.LongRunning,
-                TaskScheduler.Default);
-
-            try
-            {
-                var result = await workerTask
-                    .WaitAsync(TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs, 250, 10000)), ct)
-                    .ConfigureAwait(false);
-                _offlineUncCooldownUntilUtc.TryRemove(cooldownKey, out _);
-                return result;
-            }
-            catch (TimeoutException)
-            {
-                _offlineUncCooldownUntilUtc[cooldownKey] = DateTime.UtcNow.AddSeconds(Math.Max(5, cooldownSeconds));
-                return fallbackOnTimeoutOrBusy;
-            }
-        }
 
         public static async Task<bool> IsUncHostReachableFastAsync(
             string? targetPath,
@@ -150,12 +97,12 @@ namespace Housekeeping.Services
                 }
                 if (!string.IsNullOrWhiteSpace(fvi.FileVersion))
                     return fvi.FileVersion.Trim();
-                return asm.GetName().Version?.ToString() ?? "0.1.12-hf.1";
+                return asm.GetName().Version?.ToString() ?? "0.2.0";
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[RemoteNodeDeploymentService] GetLocalAppVersion fallback: {ex.Message}");
-                return "0.1.12-hf.1";
+                return "0.2.0";
             }
         }
 
@@ -366,6 +313,8 @@ namespace Housekeeping.Services
                     var filesToDeploy = sourceDir.GetFiles("*", SearchOption.AllDirectories)
                         .Where(f =>
                         {
+                            if (string.Equals(f.Name, "AGENTS.md", StringComparison.OrdinalIgnoreCase))
+                                return false;
                             string rel = Path.GetRelativePath(localDir, f.FullName);
                             return !ShouldExcludeFromRemoteBinarySync(rel, f.Name);
                         })
@@ -403,13 +352,13 @@ namespace Housekeeping.Services
                         }
                     }
 
-                    // If local host runs inside Clean Release Root (...\app\), also sync outer root launcher/manifest/AGENTS.md
+                    // If local host runs inside Clean Release Root (...\app\), also sync outer root launcher/manifest (never AGENTS.md)
                     string trimmedLocal = localDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
                     if (string.Equals(Path.GetFileName(trimmedLocal), "app", StringComparison.OrdinalIgnoreCase) &&
                         Directory.GetParent(trimmedLocal) is { Exists: true } localRoot &&
                         !string.Equals(remoteRoot, remoteBinaryDir, StringComparison.OrdinalIgnoreCase))
                     {
-                        foreach (string rootItem in new[] { "Housekeeping.exe", "mother.manifest.json", "AGENTS.md" })
+                        foreach (string rootItem in new[] { "Housekeeping.exe", "mother.manifest.json" })
                         {
                             string srcRootFile = Path.Combine(localRoot.FullName, rootItem);
                             if (!File.Exists(srcRootFile)) continue;
@@ -433,83 +382,6 @@ namespace Housekeeping.Services
                 catch (Exception ex)
                 {
                     log("ERROR", $"Failed to update remote app binaries on '{node.Name}': {ex.Message}");
-                    return false;
-                }
-            }, ct);
-        }
-
-        public async Task<bool> PushSettingsToRemoteAsync(
-            RemoteNodeConfig node,
-            AppConfig localConfig,
-            Action<string, string> log,
-            CancellationToken ct = default)
-        {
-            if (node == null || string.IsNullOrWhiteSpace(node.RemoteAppPath))
-            {
-                log("ERROR", "Remote node configuration or RemoteAppPath is invalid.");
-                return false;
-            }
-
-            return await Task.Run(() =>
-            {
-                try
-                {
-                    string existingSettingsPath = ResolveRemoteSettingsReadPath(node.RemoteAppPath);
-                    string targetSettingsPath = ResolveRemoteSettingsWritePath(node.RemoteAppPath);
-                    string remoteBackupsDir = ResolveRemoteBackupsDir(node.RemoteAppPath);
-
-                    log("HEADER", $"=== Syncing Settings to Remote Node: {node.Name} ({targetSettingsPath}) ===");
-                    string? settingsParent = Path.GetDirectoryName(targetSettingsPath);
-                    if (!string.IsNullOrWhiteSpace(settingsParent))
-                        Directory.CreateDirectory(settingsParent);
-
-                    var jsonOptions = new JsonSerializerOptions { WriteIndented = true, PropertyNameCaseInsensitive = true };
-                    var payloadToWrite = localConfig.DeepClone();
-
-                    if (File.Exists(existingSettingsPath))
-                    {
-                        Directory.CreateDirectory(remoteBackupsDir);
-                        string bakName = $"settings.json.bak_remote_{DateTime.Now:yyyyMMdd_HHmmss}";
-                        string bakPath = Path.Combine(remoteBackupsDir, bakName);
-                        try
-                        {
-                            File.Copy(existingSettingsPath, bakPath, overwrite: true);
-                            log("INFO", $"Created remote backup in backups\\: {bakName}");
-                        }
-                        catch (Exception exBak) { Debug.WriteLine($"[RemoteNodeDeploymentService] Remote backup skipped: {exBak.Message}"); }
-
-                        try
-                        {
-                            string existingRemoteJson = ConfigService.ReadAllTextWithRetry(existingSettingsPath);
-                            var existingRemoteCfg = JsonSerializer.Deserialize<AppConfig>(existingRemoteJson, jsonOptions);
-                            if (existingRemoteCfg != null)
-                            {
-                                if (existingRemoteCfg.WebServer != null)
-                                    payloadToWrite.WebServer = existingRemoteCfg.WebServer;
-                                if (existingRemoteCfg.RemoteNodes != null && existingRemoteCfg.RemoteNodes.Count > 0)
-                                    payloadToWrite.RemoteNodes = existingRemoteCfg.RemoteNodes;
-                            }
-                        }
-                        catch (Exception exRead) { Debug.WriteLine($"[RemoteNodeDeploymentService] Existing remote settings read skipped: {exRead.Message}"); }
-                    }
-                    else
-                    {
-                        payloadToWrite.WebServer.AdminPasswordHash = "";
-                        payloadToWrite.WebServer.AdminPasswordSalt = "";
-                        payloadToWrite.WebServer.NodeApiToken = "";
-                        payloadToWrite.WebServer.EnsureNodeApiTokenInitialized();
-                    }
-
-                    payloadToWrite.PrepareForSave();
-                    string json = JsonSerializer.Serialize(payloadToWrite, ConfigService.JsonOptions);
-                    ConfigService.AtomicWriteAllText(targetSettingsPath, json);
-
-                    log("SUCCESS", $"Settings synchronized to remote node '{node.Name}' successfully.");
-                    return true;
-                }
-                catch (Exception ex)
-                {
-                    log("ERROR", $"Failed to push settings to '{node.Name}': {ex.Message}");
                     return false;
                 }
             }, ct);

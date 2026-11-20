@@ -6,8 +6,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
+using Foundation.Core;
 
 namespace Housekeeping.Models
 {
@@ -34,7 +38,7 @@ namespace Housekeeping.Models
         private string _id = Guid.NewGuid().ToString("N");
         private string _name = "Remote Server";
         private string _hostOrIp = "";
-        private string _remoteAppPath = @"C:\Programs\Housekeeping";
+        private string _remoteAppPath = @"%LOCALAPPDATA%\Programs\StreamItAll\Mother\Housekeeping";
         private RemoteConnectionType _connectionType = RemoteConnectionType.WindowsUncShare;
         private int _port = 445;
         private string _username = "";
@@ -161,6 +165,197 @@ namespace Housekeeping.Models
             if (gb >= 1.0) return $"{gb:0.#} GB";
             double mb = freeBytes / (1024.0 * 1024);
             return $"{mb:0} MB";
+        }
+    }
+
+    public sealed record RcloneContainmentPaths(
+        bool IsContained,
+        string RcloneRootDir,
+        string ConfigFilePath,
+        string BisyncWorkDir,
+        string CacheDir);
+
+    public static class RcloneContainmentHelper
+    {
+        private static readonly string[] PathOverrideEnvVars =
+        {
+            "HOUSEKEEPING_RCLONE_DIR", "HOUSEKEEPING_DATA_DIR", "DATA_DIR",
+            "HOUSEKEEPING_HOME", "APP_HOME", "HOUSEKEEPING_CONFIG",
+            "CONFIG_PATH", "HOUSEKEEPING_LOG_DIR", "LOG_DIR"
+        };
+
+        public static RcloneContainmentPaths ResolveContainment(string? dataDirectory = null, bool forceContainment = false)
+        {
+            SandboxResolution sandbox = SandboxEnvironmentSeam.ResolveCurrent();
+            bool isolatedEnv = forceContainment || sandbox.IsSandboxActive || IsTruthyEnv("APP_ISOLATED_TEST") || HasExplicitOverrideEnv();
+
+            string? effectiveDataDir = !string.IsNullOrWhiteSpace(dataDirectory)
+                ? Path.GetFullPath(dataDirectory)
+                : ResolveEnvDataDir();
+
+            if (!string.IsNullOrWhiteSpace(effectiveDataDir) && sandbox.IsSandboxActive)
+                SandboxEnvironmentSeam.AssertSandboxPathIfActive(effectiveDataDir, sandbox);
+
+            if (string.IsNullOrWhiteSpace(effectiveDataDir) && isolatedEnv)
+            {
+                effectiveDataDir = sandbox.IsSandboxActive
+                    ? Path.Combine(sandbox.StorageDriveRoot ?? sandbox.SandboxRoot!, "Housekeeping", "data")
+                    : Path.Combine(Path.GetTempPath(), "Housekeeping_Isolated");
+            }
+
+            if (string.IsNullOrWhiteSpace(effectiveDataDir))
+                return new RcloneContainmentPaths(false, "", "", "", "");
+
+            string rcloneDir = Path.Combine(effectiveDataDir, "rclone");
+            string confPath = Path.Combine(rcloneDir, "rclone.conf");
+            string bisyncDir = Path.Combine(rcloneDir, "bisync");
+            string cacheDir = Path.Combine(rcloneDir, "cache");
+            bool shouldContain = isolatedEnv || File.Exists(confPath);
+            return new RcloneContainmentPaths(shouldContain, rcloneDir, confPath, bisyncDir, cacheDir);
+        }
+
+        public static void EnsureContainmentDirectories(RcloneContainmentPaths paths)
+        {
+            if (!paths.IsContained) return;
+            Directory.CreateDirectory(paths.RcloneRootDir);
+            Directory.CreateDirectory(paths.BisyncWorkDir);
+            Directory.CreateDirectory(paths.CacheDir);
+            if (!File.Exists(paths.ConfigFilePath))
+                File.WriteAllText(paths.ConfigFilePath, "", new UTF8Encoding(false));
+        }
+
+        public static IReadOnlyDictionary<string, string> BuildEnvironmentVariables(RcloneContainmentPaths paths)
+        {
+            if (!paths.IsContained)
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["RCLONE_CONFIG"] = paths.ConfigFilePath,
+                ["RCLONE_CACHE_DIR"] = paths.CacheDir
+            };
+        }
+
+        public static string AppendContainmentFlags(string flags, RcloneContainmentPaths paths, bool includeBisyncWorkdir)
+        {
+            if (!paths.IsContained) return flags;
+            var parts = new List<string>();
+            if (!string.IsNullOrWhiteSpace(flags)) parts.Add(flags.Trim());
+            if (!ContainsCliFlag(flags, "--config")) parts.Add($"--config \"{paths.ConfigFilePath}\"");
+            if (includeBisyncWorkdir && !ContainsCliFlag(flags, "--workdir")) parts.Add($"--workdir \"{paths.BisyncWorkDir}\"");
+            if (!ContainsCliFlag(flags, "--cache-dir")) parts.Add($"--cache-dir \"{paths.CacheDir}\"");
+            return string.Join(" ", parts);
+        }
+
+        private static bool ContainsCliFlag(string flags, string flag) =>
+            !string.IsNullOrWhiteSpace(flags) &&
+            Regex.IsMatch(flags, $@"(?:^|\s){Regex.Escape(flag)}(?:=|\s|$)", RegexOptions.IgnoreCase);
+
+        private static bool HasExplicitOverrideEnv() =>
+            Array.Exists(PathOverrideEnvVars, v => !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)));
+
+        private static string? ResolveEnvDataDir()
+        {
+            foreach (string key in new[] { "HOUSEKEEPING_RCLONE_DIR", "HOUSEKEEPING_DATA_DIR", "DATA_DIR", "HOUSEKEEPING_HOME", "APP_HOME" })
+            {
+                string? val = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrWhiteSpace(val)) return Path.GetFullPath(val.Trim());
+            }
+            string? cfg = Environment.GetEnvironmentVariable("HOUSEKEEPING_CONFIG") ?? Environment.GetEnvironmentVariable("CONFIG_PATH");
+            return !string.IsNullOrWhiteSpace(cfg) ? Path.GetDirectoryName(Path.GetFullPath(cfg.Trim())) : null;
+        }
+
+        private static bool IsTruthyEnv(string name)
+        {
+            string? v = Environment.GetEnvironmentVariable(name);
+            return !string.IsNullOrWhiteSpace(v) && (v.Equals("1", StringComparison.OrdinalIgnoreCase) || v.Equals("true", StringComparison.OrdinalIgnoreCase) || v.Equals("yes", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+
+    public partial class RomLauncherGeneratorConfig
+    {
+        public void SanitizeAutoGeneratedCommandOverrides()
+        {
+            if (UseCustomPrePostLaunchCommands) return;
+            if (DefaultSyncPaths.Count == 0 && string.IsNullOrWhiteSpace(SaveSyncLocalFolder)) return;
+
+            if (!string.IsNullOrWhiteSpace(PreLaunchCommand) && LooksLikeAutoGeneratedRclonePreview(PreLaunchCommand))
+                PreLaunchCommand = "";
+            if (!string.IsNullOrWhiteSpace(PostLaunchCommand) && LooksLikeAutoGeneratedRclonePreview(PostLaunchCommand))
+                PostLaunchCommand = "";
+        }
+
+        private static bool LooksLikeAutoGeneratedRclonePreview(string cmd)
+        {
+            string trimmed = cmd.Trim();
+            return trimmed.Contains("rclone", StringComparison.OrdinalIgnoreCase) &&
+                   (trimmed.Contains("--create-empty-src-dirs", StringComparison.OrdinalIgnoreCase) ||
+                    trimmed.Contains("--resilient", StringComparison.OrdinalIgnoreCase));
+        }
+
+        public (List<string> PreCmds, List<string> PostCmds) ResolveAllSyncCommands(string rcloneExe, ConsoleCollectionRule? col = null) =>
+            ResolveAllSyncCommands(rcloneExe, col, dataDirectory: null, forceContainment: false);
+
+        public (List<string> PreCmds, List<string> PostCmds) ResolveAllSyncCommands(
+            string rcloneExe,
+            ConsoleCollectionRule? col,
+            string? dataDirectory,
+            bool forceContainment = false)
+        {
+            string exe = string.IsNullOrWhiteSpace(rcloneExe) ? "rclone.exe" : rcloneExe;
+            var preCmds = new List<string>();
+            var postCmds = new List<string>();
+            var activePaths = (col != null && col.OverrideJobSyncPaths && col.CustomSyncPaths.Count > 0) ? col.CustomSyncPaths : DefaultSyncPaths;
+
+            bool hasConfiguredSyncRows = activePaths.Count > 0 ||
+                (!string.IsNullOrWhiteSpace(SaveSyncLocalFolder) && !string.IsNullOrWhiteSpace(SaveSyncCloudRemote));
+            bool honorManualCliOverride = UseCustomPrePostLaunchCommands ||
+                (!hasConfiguredSyncRows && (!string.IsNullOrWhiteSpace(PreLaunchCommand) || !string.IsNullOrWhiteSpace(PostLaunchCommand)));
+
+            if (honorManualCliOverride)
+            {
+                if (!string.IsNullOrWhiteSpace(PreLaunchCommand)) preCmds.Add(PreLaunchCommand.Trim());
+                if (!string.IsNullOrWhiteSpace(PostLaunchCommand)) postCmds.Add(PostLaunchCommand.Trim());
+                if (preCmds.Count > 0 || postCmds.Count > 0) return (preCmds, postCmds);
+            }
+
+            if (activePaths.Count == 0 && !string.IsNullOrWhiteSpace(SaveSyncLocalFolder) && !string.IsNullOrWhiteSpace(SaveSyncCloudRemote))
+            {
+                activePaths = new List<GameSyncPathItem>
+                {
+                    new() { Enabled = true, Label = "Saves", LocalPath = SaveSyncLocalFolder, RemoteTarget = SaveSyncCloudRemote, SyncMode = SaveSyncMode ?? "bisync" }
+                };
+            }
+
+            var containment = RcloneContainmentHelper.ResolveContainment(dataDirectory, forceContainment);
+            foreach (var item in activePaths.Where(p => p.Enabled && !string.IsNullOrWhiteSpace(p.LocalPath) && !string.IsNullOrWhiteSpace(p.RemoteTarget)))
+            {
+                string local = item.LocalPath.Trim();
+                string remote = item.RemoteTarget.Trim();
+                string mode = (item.SyncMode ?? "bisync").Trim().ToLowerInvariant();
+                bool isBisync = mode is not ("sync" or "copy");
+
+                string basePre = isBisync
+                    ? $"\"{exe}\" bisync \"{local}\" \"{remote}\" --create-empty-src-dirs --resilient --max-lock 2h --verbose"
+                    : $"\"{exe}\" {mode} \"{remote}\" \"{local}\" --create-empty-src-dirs --verbose";
+                string basePost = isBisync
+                    ? $"\"{exe}\" bisync \"{local}\" \"{remote}\" --create-empty-src-dirs --resilient --max-lock 2h --verbose"
+                    : $"\"{exe}\" {mode} \"{local}\" \"{remote}\" --create-empty-src-dirs --verbose";
+
+                preCmds.Add(RcloneContainmentHelper.AppendContainmentFlags(basePre, containment, isBisync));
+                postCmds.Add(RcloneContainmentHelper.AppendContainmentFlags(basePost, containment, isBisync));
+            }
+
+            return (preCmds, postCmds);
+        }
+
+        public (string PreCmd, string PostCmd) ResolvePreAndPostSyncCommands(string rcloneExe) =>
+            ResolvePreAndPostSyncCommands(rcloneExe, dataDirectory: null, forceContainment: false);
+
+        public (string PreCmd, string PostCmd) ResolvePreAndPostSyncCommands(string rcloneExe, string? dataDirectory, bool forceContainment = false)
+        {
+            var (pre, post) = ResolveAllSyncCommands(rcloneExe, null, dataDirectory, forceContainment);
+            return (string.Join(" & ", pre), string.Join(" & ", post));
         }
     }
 }

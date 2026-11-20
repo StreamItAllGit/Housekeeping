@@ -16,6 +16,7 @@
 
 using System;
 using System.Runtime.InteropServices;
+using Housekeeping.Interop;
 
 #nullable disable
 #pragma warning disable 1591 // Disable XML documentation warnings
@@ -120,9 +121,11 @@ namespace MediaInfoLib
         [DllImport("MediaInfo.dll")]
         private static extern IntPtr MediaInfo_Count_Get(IntPtr Handle, IntPtr StreamKind, IntPtr StreamNumber);
 
+        static MediaInfo() => MediaInfoNativeResolver.EnsureRegistered();
         //MediaInfo class
         public MediaInfo()
         {
+            MediaInfoNativeResolver.EnsureRegistered();
             try
             {
                 Handle = MediaInfo_New();
@@ -136,7 +139,8 @@ namespace MediaInfoLib
             else
                 MustUseAnsi=false;
         }
-        ~MediaInfo() { if (Handle == (IntPtr)0) return; MediaInfo_Delete(Handle); }
+        public bool IsHandleValid => Handle != (IntPtr)0;
+        ~MediaInfo() { if (Handle == (IntPtr)0) return; try { MediaInfo_Delete(Handle); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MediaInfo] Delete skipped: {ex.Message}"); } }
         public int Open(String FileName)
         {
             if (Handle == (IntPtr)0)
@@ -269,9 +273,15 @@ namespace MediaInfoLib
         [DllImport("MediaInfo.dll")]
         private static extern IntPtr MediaInfoList_Count_Get(IntPtr Handle, IntPtr FilePos, IntPtr StreamKind, IntPtr StreamNumber);
 
+        static MediaInfoList() => MediaInfoNativeResolver.EnsureRegistered();
         //MediaInfo class
-        public MediaInfoList() { Handle = MediaInfoList_New(); }
-        ~MediaInfoList() { MediaInfoList_Delete(Handle); }
+        public MediaInfoList()
+        {
+            MediaInfoNativeResolver.EnsureRegistered();
+            try { Handle = MediaInfoList_New(); }
+            catch { Handle = (IntPtr)0; }
+        }
+        ~MediaInfoList() { if (Handle == (IntPtr)0) return; try { MediaInfoList_Delete(Handle); } catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MediaInfoList] Delete skipped: {ex.Message}"); } }
         public int Open(String FileName, InfoFileOptions Options) { return (int)MediaInfoList_Open(Handle, FileName, (IntPtr)Options); }
         public void Close(int FilePos) { MediaInfoList_Close(Handle, (IntPtr)FilePos); }
         public String Inform(int FilePos) { return Marshal.PtrToStringUni(MediaInfoList_Inform(Handle, (IntPtr)FilePos, (IntPtr)0)); }

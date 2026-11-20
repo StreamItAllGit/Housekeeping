@@ -50,7 +50,7 @@ namespace Housekeeping.Services
         [JsonPropertyName("lockType")] public string LockType { get; set; } = "directory-mutation";
         [JsonPropertyName("suiteId")] public string SuiteId { get; set; } = "mother";
         [JsonPropertyName("ownerAppId")] public string OwnerAppId { get; set; } = "housekeeping";
-        [JsonPropertyName("version")] public string Version { get; set; } = "0.1.12-hf.1";
+        [JsonPropertyName("version")] public string Version { get; set; } = "0.2.0";
         [JsonPropertyName("pid")] public int Pid { get; set; }
         [JsonPropertyName("processStartTimeUtc")] public string? ProcessStartTimeUtc { get; set; }
         [JsonPropertyName("hostname")] public string Hostname { get; set; } = Environment.MachineName;
@@ -125,7 +125,7 @@ namespace Housekeeping.Services
         [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; } = 1;
         [JsonPropertyName("updatedAtUtc")] public string UpdatedAtUtc { get; set; } = "";
         [JsonPropertyName("updatedByApp")] public string UpdatedByApp { get; set; } = "housekeeping";
-        [JsonPropertyName("updatedByVersion")] public string UpdatedByVersion { get; set; } = "0.1.12-hf.1";
+        [JsonPropertyName("updatedByVersion")] public string UpdatedByVersion { get; set; } = "0.2.0";
         [JsonPropertyName("hashFilePlacement")] public string HashFilePlacement { get; set; } = "SidecarBeside";
         [JsonPropertyName("archives")] public Dictionary<string, ArchiveContainerHashRecord> Archives { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
@@ -133,7 +133,7 @@ namespace Housekeeping.Services
     public sealed class SharedRootOwnerEntry
     {
         [JsonPropertyName("appId")] public string AppId { get; set; } = "";
-        [JsonPropertyName("version")] public string Version { get; set; } = "0.1.12-hf.1";
+        [JsonPropertyName("version")] public string Version { get; set; } = "0.2.0";
         [JsonPropertyName("port")] public int Port { get; set; }
         [JsonPropertyName("updatedAtUtc")] public string UpdatedAtUtc { get; set; } = "";
         [JsonPropertyName("modules")] public List<string> Modules { get; set; } = new();
@@ -147,7 +147,7 @@ namespace Housekeeping.Services
         [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; } = 2;
         [JsonPropertyName("manifestType")] public string ManifestType { get; set; } = "shared-root-coexistence";
         [JsonPropertyName("appId")] public string AppId { get; set; } = "housekeeping";
-        [JsonPropertyName("version")] public string Version { get; set; } = "0.1.12-hf.1";
+        [JsonPropertyName("version")] public string Version { get; set; } = "0.2.0";
         [JsonPropertyName("updatedAtUtc")] public string UpdatedAtUtc { get; set; } = "";
         [JsonPropertyName("coexistenceMode")] public string CoexistenceMode { get; set; } = "Co-Audit (Zero-Rewrite)";
         [JsonPropertyName("hashFilePlacement")] public string HashFilePlacement { get; set; } = "SidecarBeside";
@@ -200,7 +200,7 @@ namespace Housekeeping.Services
         [JsonPropertyName("appId")] public string AppId { get; set; } = "housekeeping";
         [JsonPropertyName("suiteId")] public string SuiteId { get; set; } = "mother";
         [JsonPropertyName("schemaVersion")] public int SchemaVersion { get; set; } = 2;
-        [JsonPropertyName("version")] public string Version { get; set; } = "0.1.12-hf.1";
+        [JsonPropertyName("version")] public string Version { get; set; } = "0.2.0";
         [JsonPropertyName("port")] public int Port { get; set; } = 5178;
         [JsonPropertyName("updatedAtUtc")] public string UpdatedAtUtc { get; set; } = "";
         [JsonPropertyName("shouldAutoAlignSisterApps")] public bool ShouldAutoAlignSisterApps { get; set; }

@@ -70,6 +70,11 @@ namespace Housekeeping.Services
                     {
                         var ex = e.ExceptionObject as Exception
                                  ?? new Exception($"Unhandled non-Exception object: {e.ExceptionObject}");
+                        if (!e.IsTerminating && CrashBundleExceptionFilter.IsBenignBackgroundException(ex))
+                        {
+                            EmitBenignDisconnectWarning(ex, null, null, null);
+                            return;
+                        }
                         WriteCrashBundle(ex);
                     }
                     catch (Exception handlerEx)
@@ -85,7 +90,8 @@ namespace Housekeeping.Services
         public static bool HandleUnobservedTaskException(
             UnobservedTaskExceptionEventArgs e,
             string? logsDirOverride = null,
-            string? buildVersionOverride = null)
+            string? buildVersionOverride = null,
+            TerminalLogBufferService? logBufferOverride = null)
         {
             if (e == null) return false;
             try
@@ -93,17 +99,62 @@ namespace Housekeeping.Services
                 e.SetObserved();
                 if (e.Exception == null || CrashBundleExceptionFilter.IsBenignBackgroundException(e.Exception))
                 {
-                    Debug.WriteLine($"[CrashBundleService] Suppressed benign unobserved task exception: {e.Exception?.GetBaseException().Message}");
+                    EmitBenignDisconnectWarning(e.Exception, logsDirOverride, buildVersionOverride, logBufferOverride);
                     return false;
                 }
 
-                string? written = WriteCrashBundle(e.Exception.Flatten(), logsDirOverride: logsDirOverride, buildVersionOverride: buildVersionOverride);
+                string? written = WriteCrashBundle(
+                    e.Exception.Flatten(),
+                    logsDirOverride: logsDirOverride,
+                    buildVersionOverride: buildVersionOverride,
+                    logBufferOverride: logBufferOverride);
                 return !string.IsNullOrWhiteSpace(written);
             }
             catch (Exception ex)
             {
                 Debug.WriteLine($"[CrashBundleService] HandleUnobservedTaskException ignored: {ex.Message}");
                 return false;
+            }
+        }
+
+        private static void EmitBenignDisconnectWarning(
+            Exception? ex,
+            string? logsDirOverride,
+            string? buildVersionOverride,
+            TerminalLogBufferService? logBufferOverride)
+        {
+            string kind = CrashBundleExceptionFilter.DescribeTransientDisconnect(ex);
+            string detail = SanitizeText(ex?.GetBaseException().Message);
+            string warnMsg = $"[CrashBundleService] Suppressed transient background disconnect ({kind}): {detail}";
+            Trace.TraceWarning(warnMsg);
+
+            try
+            {
+                var logBuffer = logBufferOverride ?? _logBufferProvider?.Invoke();
+                if (logBuffer != null)
+                {
+                    logBuffer.Append("WARN", warnMsg);
+                    return;
+                }
+
+                string? logsDir = !string.IsNullOrWhiteSpace(logsDirOverride) ? logsDirOverride : _logsDirProvider?.Invoke();
+                if (!string.IsNullOrWhiteSpace(logsDir))
+                {
+                    Directory.CreateDirectory(logsDir);
+                    string version = !string.IsNullOrWhiteSpace(buildVersionOverride) ? buildVersionOverride.Trim() : _buildVersion;
+                    if (string.IsNullOrWhiteSpace(version)) version = CrashBundleExceptionFilter.DefaultFallbackVersion;
+                    string line = $"{DateTime.UtcNow:yyyy-MM-ddTHH:mm:ss.fffZ} [v{version}] [PID:{Environment.ProcessId}/T:{Environment.CurrentManagedThreadId}] [WARN] [CrashBundleService] {warnMsg}{Environment.NewLine}";
+                    lock (SyncLock)
+                    {
+                        using var fs = new FileStream(Path.Combine(logsDir, "Housekeeping_Live.log"), FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096);
+                        using var writer = new StreamWriter(fs, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                        writer.Write(line);
+                    }
+                }
+            }
+            catch (Exception logEx)
+            {
+                Debug.WriteLine($"[CrashBundleService] Benign disconnect telemetry skipped: {logEx.Message}");
             }
         }
 

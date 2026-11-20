@@ -23,10 +23,22 @@ namespace Housekeeping.Services.Modules
         public static string StripAnsiCodes(string? input) =>
             string.IsNullOrEmpty(input) ? string.Empty : AnsiEscapeRegex.Replace(input, string.Empty);
 
-        public static string BuildRcloneCommand(string rcloneExe, CloudSyncJobItem job, bool forceResync)
+        public static string BuildRcloneCommand(string rcloneExe, CloudSyncJobItem job, bool forceResync) =>
+            BuildRcloneCommand(rcloneExe, job, forceResync, dataDirectory: null, forceContainment: false);
+
+        public static string BuildRcloneCommand(
+            string rcloneExe,
+            CloudSyncJobItem job,
+            bool forceResync,
+            string? dataDirectory,
+            bool forceContainment = false)
         {
             string mode = string.IsNullOrWhiteSpace(job.SyncMode) ? "bisync" : job.SyncMode.Trim().ToLowerInvariant();
             string userFlags = SisterAppCoexistenceService.EnsureCoexistenceRcloneExcludes(job.Flags);
+
+            var containment = RcloneContainmentHelper.ResolveContainment(dataDirectory, forceContainment);
+            if (containment.IsContained)
+                userFlags = RcloneContainmentHelper.AppendContainmentFlags(userFlags, containment, mode == "bisync");
 
             string maxLockFlag = (mode == "bisync" && !userFlags.Contains("--max-lock", StringComparison.OrdinalIgnoreCase))
                 ? " --max-lock 2h"
@@ -188,7 +200,8 @@ namespace Housekeeping.Services.Modules
                 }
 
                 string mode = string.IsNullOrWhiteSpace(job.SyncMode) ? "bisync" : job.SyncMode.Trim().ToLowerInvariant();
-                string cmd = BuildRcloneCommand(rcloneExe, job, forceResync);
+                var containment = RcloneContainmentHelper.ResolveContainment(ctx.ConfigService.DataDirectory, ctx.ConfigService.IsIsolatedOverride);
+                string cmd = BuildRcloneCommand(rcloneExe, job, forceResync, ctx.ConfigService.DataDirectory, ctx.ConfigService.IsIsolatedOverride);
 
                 if (ctx.IsDryRun)
                 {
@@ -197,16 +210,23 @@ namespace Housekeeping.Services.Modules
                     continue;
                 }
 
+                if (containment.IsContained)
+                    RcloneContainmentHelper.EnsureContainmentDirectories(containment);
+
+                var rcloneEnv = containment.IsContained
+                    ? RcloneContainmentHelper.BuildEnvironmentVariables(containment)
+                    : null;
+
                 using var sentinel = NetworkSafetyService.AcquireDirectorySentinelLock(job.LocalPath, $"cloud-sync-{mode}");
                 ctx.Log("WORK", $"[{idx}/{activeJobs.Count}] Running rclone {mode} for '{job.JobName}'...");
                 bool useExternal = ctx.ResolveUseExternalCmd(cfg);
-                var res = await ctx.ProcessRunner.RunCommandAsync(cmd, useExternal, job.LocalPath, belowNormalPriority: false, logOutputToTerminal: true, ct);
+                var res = await ctx.ProcessRunner.RunCommandAsync(cmd, useExternal, job.LocalPath, belowNormalPriority: false, logOutputToTerminal: true, ct, rcloneEnv);
 
                 if (mode == "bisync" && !ct.IsCancellationRequested && res.ExitCode != 0 && res.ExitCode != -999 &&
                     TryRecoverOrphanedBisyncLock(res, hasActiveRcloneProcess: null, ctx.Log, out _))
                 {
                     ctx.Log("WORK", $"[{idx}/{activeJobs.Count}] Retrying rclone bisync for '{job.JobName}' after orphaned lock cleanup...");
-                    res = await ctx.ProcessRunner.RunCommandAsync(cmd, useExternal, job.LocalPath, belowNormalPriority: false, logOutputToTerminal: true, ct);
+                    res = await ctx.ProcessRunner.RunCommandAsync(cmd, useExternal, job.LocalPath, belowNormalPriority: false, logOutputToTerminal: true, ct, rcloneEnv);
                 }
 
                 if (ct.IsCancellationRequested || res.ExitCode == -999)

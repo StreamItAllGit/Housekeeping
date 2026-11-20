@@ -280,8 +280,8 @@ namespace Housekeeping.Services
             string fullPath = Path.IsPathRooted(sample)
                 ? sample
                 : ((sample.Contains('\\') || sample.Contains('/'))
-                    ? Path.Combine(@"E:\Sets", sample)
-                    : Path.Combine(@"C:\Media\Anime", sample));
+                    ? Path.Combine("<MediaRoot>", "Sets", sample)
+                    : Path.Combine("<MediaRoot>", "Video", sample));
 
             dto.FileName = fileName;
             dto.RelativePath = relativePath;
