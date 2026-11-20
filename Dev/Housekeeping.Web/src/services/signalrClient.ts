@@ -4,6 +4,7 @@ import type {
   TelemetrySnapshotDto,
   TerminalLogEntry,
 } from '../types/models';
+import { resolveAppUrl } from '../utils/subpathUrl';
 
 export interface SignalRCallbacks {
   onTerminalBatch: (entries: TerminalLogEntry[]) => void;
@@ -23,10 +24,11 @@ export class HousekeepingSignalRClient {
     await this.disconnect();
     this.targetNodeId = targetNodeId || 'local';
 
+    const hubBaseUrl = resolveAppUrl('/hubs/housekeeping');
     const url =
       this.targetNodeId !== 'local'
-        ? `/hubs/housekeeping?targetNodeId=${encodeURIComponent(this.targetNodeId)}`
-        : '/hubs/housekeeping';
+        ? `${hubBaseUrl}?targetNodeId=${encodeURIComponent(this.targetNodeId)}`
+        : hubBaseUrl;
 
     const conn = new signalR.HubConnectionBuilder()
       .withUrl(url, {

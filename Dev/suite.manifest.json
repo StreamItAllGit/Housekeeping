@@ -1,70 +1,79 @@
 {
-  "$schema": "https://schemas.local/manifest.v2.json",
+  "$schema": "https://schemas.local/suite-manifest.v2.json",
   "schemaVersion": 2,
   "manifestType": "suite-app",
   "appId": "housekeeping",
-  "version": "0.1.12-hf.1",
-  "updatedAtUtc": "2026-11-15T20:00:00.000Z",
+  "name": "Housekeeping",
+  "shortName": "Housekeeping",
+  "displayName": "Housekeeping",
   "suiteId": "mother",
-  "port": 5178,
+  "suiteName": "Mother",
+  "version": "0.2.0",
+  "activeMilestone": "0.2.0",
+  "goalMajorVersion": "1.0.0",
+  "updatedAtUtc": "2026-11-20T00:00:00.000Z",
+  "sdkVersion": "0.5.3",
+  "minSuiteVersion": "0.3.0",
+  "spdxLicense": "MPL-2.0",
+  "installProfile": "full",
+  "umbrellaSubpath": "StreamItAll\\Mother\\Housekeeping",
+  "productionSubpath": "StreamItAll\\Mother\\Housekeeping",
+  "appUserModelId": "StreamItAll.Housekeeping",
+  "executable": "app\\Housekeeping.exe",
+  "launcherExecutable": "Housekeeping.exe",
+  "internalPort": 5178,
   "httpsPort": 8478,
-  "coexistenceStatusEndpoint": "/api/v1/coexistence/status",
-  "schema_version": "1.0",
-  "app_id": "housekeeping",
-  "id": "housekeeping",
-  "display_name": "Housekeeping",
-  "brand_accent": "#f59e0b",
-  "archetype": "companion_daemon",
-  "app_user_model_id": "StreamItAll.Housekeeping",
-  "default_port": 5178,
-  "https_port": 8478,
-  "health_endpoint": "/api/v1/system/health",
-  "single_tray_mutex": "Global\\Mother_Supervisor_Active",
-  "managed_env_var": "HOUSEKEEPING_MANAGED_BY_MOTHER",
+  "brandAccent": "#f59e0b",
+  "singleTrayMutex": "Global\\Mother_Housekeeping_Mutex",
+  "managedEnvVar": "HOUSEKEEPING_MANAGED_BY_MOTHER",
+  "workerArgs": [
+    "--managed-by-suite",
+    "--suite-id",
+    "mother",
+    "--bind",
+    "127.0.0.1",
+    "--port",
+    "{port}"
+  ],
+  "residency": {
+    "defaultMode": "warm",
+    "allowedModes": [
+      "warm",
+      "cold",
+      "disabled"
+    ],
+    "idleTimeoutMinutes": 15,
+    "wakeOnApiRequest": true,
+    "wakeOnUiNavigation": true,
+    "wakeOnSchedule": true
+  },
   "commands": {
-    "start": [
-      "scripts/start-daemon.bat",
-      "--managed-by-mother"
-    ],
-    "stop": [
-      "scripts/stop-daemon.bat"
-    ],
-    "restart": [
-      "scripts/start-daemon.bat",
-      "--managed-by-mother"
-    ],
-    "status": [
-      "scripts/status-check.bat"
-    ],
-    "open": [
-      "Housekeeping.exe"
-    ],
-    "backup": [
-      "scripts/backup-now.bat"
-    ]
+    "startDaemon": "scripts/start-daemon.bat --managed-by-suite --bind 127.0.0.1",
+    "stopDaemon": "scripts/stop-daemon.bat",
+    "statusCheck": "scripts/status-check.bat",
+    "backupNow": "scripts/backup-now.bat"
   },
   "endpoints": {
-    "health": "http://127.0.0.1:5178/api/v1/system/health",
-    "status": "http://127.0.0.1:5178/api/v1/pipeline/state",
-    "coexistence_status": "http://127.0.0.1:5178/api/v1/coexistence/status",
-    "telemetry": "http://127.0.0.1:5178/api/v1/system/telemetry",
-    "scheduler_status": "http://127.0.0.1:5178/api/v1/scheduler/status",
-    "scheduler_defer": "http://127.0.0.1:5178/api/v1/scheduler/defer",
-    "shutdown": "http://127.0.0.1:5178/api/v1/system/shutdown"
+    "health": "/api/v1/health",
+    "status": "/api/v1/pipeline/state",
+    "coexistenceStatus": "/api/v1/coexistence/status",
+    "telemetry": "/api/v1/system/telemetry",
+    "schedulerStatus": "/api/v1/scheduler/status",
+    "schedulerDefer": "/api/v1/scheduler/defer",
+    "tailscaleQr": "/api/v1/system/tailscale-qr",
+    "shutdown": "/api/v1/system/shutdown",
+    "ui": "./"
   },
   "paths": {
-    "data_dir": "data",
-    "config_dir": "data",
-    "log_dir": "logs",
-    "crashes_dir": "logs/crashes",
-    "backups_dir": "backups"
+    "dataDir": "data",
+    "configDir": "data",
+    "logDir": "logs",
+    "crashesDir": "logs/crashes",
+    "backupsDir": "backups"
   },
-  "displayName": "Housekeeping",
-  "sdkVersion": "0.3.0",
-  "minSuiteVersion": "0.1.0",
+  "schedules": [],
+  "targetDrives": [],
   "containerTier": "Tier A (4-Folder)",
   "ecosystemTier": "Tier2_SisterApp",
-  "appArchetype": "SIS",
-  "activeMilestone": "0.1.13",
-  "goalMajorVersion": "1.0.0"
+  "appArchetype": "SIS"
 }

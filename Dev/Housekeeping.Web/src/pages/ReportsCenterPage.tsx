@@ -4,32 +4,17 @@
 // @exports: ReportsCenterPage
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArchiveTemplateEditorDialog } from '../components/ArchiveTemplateEditorDialog';
-import {
-  formatReportBytes,
-  ReportCleanupDryRunModal,
-} from '../components/ReportCleanupDryRunModal';
+import { formatReportBytes, ReportCleanupDryRunModal } from '../components/ReportCleanupDryRunModal';
 import { useAppState } from '../context/AppStateContext';
 import { COMMON_UI_HINTS } from '../hints/commonDialogs';
 import { apiClient } from '../services/apiClient';
-import type {
-  ArchiveCleanupDryRunResult,
-  ComplianceReportItem,
-  ReportsQueryResponse,
-} from '../types/models';
+import { resolveApiV1Url } from '../utils/subpathUrl';
+import type { ArchiveCleanupDryRunResult, ComplianceReportItem, ReportsQueryResponse } from '../types/models';
 
 export const ReportsCenterPage: React.FC = () => {
   const {
-    config,
-    authStatus,
-    builtInArchiveTemplates,
-    updateConfig,
-    flushSaveNow,
-    pipelineState,
-    setPipelineState,
-    setGlobalDrawerOpen,
-    openComplianceCount,
-    setOpenComplianceCount,
-    showToast,
+    config, authStatus, builtInArchiveTemplates, updateConfig, flushSaveNow,
+    pipelineState, setPipelineState, setGlobalDrawerOpen, openComplianceCount, setOpenComplianceCount, showToast,
   } = useAppState();
 
   const [data, setData] = useState<ReportsQueryResponse | null>(null);
@@ -291,14 +276,14 @@ export const ReportsCenterPage: React.FC = () => {
               {scanning ? 'Scanning Archives...' : '🔍 Scan Archives Now'}
             </button>
             <a
-              href="/api/v1/reports/export-csv"
+              href={resolveApiV1Url('/reports/export-csv')}
               className="hk-btn sm"
               style={{ textDecoration: 'none' }}
             >
               📥 Export CSV
             </a>
             <a
-              href="/api/v1/reports/export-json"
+              href={resolveApiV1Url('/reports/export-json')}
               className="hk-btn sm"
               style={{ textDecoration: 'none' }}
             >

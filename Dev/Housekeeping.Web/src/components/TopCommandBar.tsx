@@ -1,14 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAppState, type UiDensityMode } from '../context/AppStateContext';
 import { apiClient } from '../services/apiClient';
-import type { TailscalePwaStatusDto } from '../types/models';
+import { resolveApiV1Url } from '../utils/subpathUrl';
 import { ModalDialog } from './ModalDialog';
 import { SnapshotHistoryDialog } from './SnapshotHistoryDialog';
-
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
-}
+import { TopBarPwaControls } from './TopBarPwaControls';
 
 export const TopCommandBar: React.FC = () => {
   const {
@@ -38,55 +34,7 @@ export const TopCommandBar: React.FC = () => {
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [mobileControlsOpen, setMobileControlsOpen] = useState(false);
-  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
-  const [isStandalonePwa, setIsStandalonePwa] = useState<boolean>(() =>
-    typeof window !== 'undefined'
-      ? window.matchMedia('(display-mode: standalone)').matches
-      : false
-  );
-  const [tailscalePwa, setTailscalePwa] = useState<TailscalePwaStatusDto | null>(null);
   const fileImportRef = useRef<HTMLInputElement | null>(null);
-
-  const isInsecureRemoteOrigin = typeof window !== 'undefined' && !window.isSecureContext;
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const onBeforeInstall = (e: Event) => {
-      e.preventDefault();
-      setInstallPrompt(e as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setInstallPrompt(null);
-      setIsStandalonePwa(true);
-    };
-    window.addEventListener('beforeinstallprompt', onBeforeInstall);
-    window.addEventListener('appinstalled', onInstalled);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
-      window.removeEventListener('appinstalled', onInstalled);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!authStatus?.isAuthenticated || !isInsecureRemoteOrigin) return;
-    apiClient
-      .getTailscalePwaStatus()
-      .then((res) => setTailscalePwa(res))
-      .catch((err) => {
-        console.debug('[TopCommandBar] Tailscale PWA probe skipped:', err);
-      });
-  }, [authStatus?.isAuthenticated, isInsecureRemoteOrigin]);
-
-  const handleInstallPwa = async () => {
-    if (!installPrompt) return;
-    try {
-      await installPrompt.prompt();
-      const choice = await installPrompt.userChoice;
-      if (choice.outcome === 'accepted') setInstallPrompt(null);
-    } catch (err) {
-      console.debug('[TopCommandBar] PWA prompt dismissed:', err);
-    }
-  };
 
   const disks = telemetry?.Disks || [];
   const remoteNodes = config?.RemoteNodes || [];
@@ -183,7 +131,7 @@ export const TopCommandBar: React.FC = () => {
       typeof window !== 'undefined' &&
       window.matchMedia('(prefers-color-scheme: dark)').matches);
 
-  const versionNumber = (authStatus?.version || '0.1.12-hf.1').replace(/^v/i, '');
+  const versionNumber = (authStatus?.version || '0.2.0').replace(/^v/i, '');
 
   const openWebSettingsSubtab = () => {
     try {
@@ -208,7 +156,7 @@ export const TopCommandBar: React.FC = () => {
       <div className="hk-topbar-row hk-desktop-only">
         <div className="hk-row">
           <div className="hk-brand">
-            <img src="/app_icon.png" alt="Housekeeping" />
+            <img src="./app_icon.png" alt="Housekeeping" />
             <div>
               <div className="hk-row" style={{ gap: 6 }}>
                 <span className="hk-brand-title">Housekeeping</span>
@@ -275,41 +223,11 @@ export const TopCommandBar: React.FC = () => {
         </div>
 
         <div className="hk-row">
-          {!isStandalonePwa && installPrompt && (
-            <button
-              type="button"
-              className="hk-btn sm primary"
-              onClick={() => void handleInstallPwa()}
-              title="Install Housekeeping as a standalone desktop or Android PWA"
-            >
-              📲 Install App
-            </button>
-          )}
-          {!isStandalonePwa &&
-            isInsecureRemoteOrigin &&
-            tailscalePwa?.ServeConfigured &&
-            tailscalePwa.HttpsPwaUrl && (
-              <a
-                href={tailscalePwa.HttpsPwaUrl}
-                className="hk-btn sm primary"
-                style={{ textDecoration: 'none' }}
-                title="Android/iOS require HTTPS to install a PWA — tap to switch to your trusted Tailscale HTTPS URL"
-              >
-                🔒 Switch to HTTPS (PWA)
-              </a>
-            )}
-          {!isStandalonePwa &&
-            isInsecureRemoteOrigin &&
-            (!tailscalePwa?.ServeConfigured || !tailscalePwa.HttpsPwaUrl) && (
-              <button
-                type="button"
-                className="hk-btn sm"
-                onClick={openWebSettingsSubtab}
-                title="Configure Tailscale Serve HTTPS so Android can install Housekeeping as a standalone PWA"
-              >
-                📱 Setup HTTPS PWA
-              </button>
-            )}
+          <TopBarPwaControls
+            isAuthenticated={Boolean(authStatus?.isAuthenticated)}
+            variant="desktop"
+            onOpenWebSettings={openWebSettingsSubtab}
+          />
 
           <select
             className="hk-select"
@@ -401,7 +319,7 @@ export const TopCommandBar: React.FC = () => {
       {/* Mobile Browser & Standalone PWA Compact Header (<= 768px) */}
       <div className="hk-mobile-only hk-mobile-topbar-main">
         <div className="hk-mobile-brand">
-          <img src="/app_icon.png" alt="Housekeeping" />
+          <img src="./app_icon.png" alt="Housekeeping" />
           <div style={{ minInlineSize: 0, flex: '1 1 auto' }}>
             <div className="hk-row" style={{ gap: 5, flexWrap: 'nowrap' }}>
               <span className="hk-brand-title" style={{ fontSize: 14 }}>
@@ -520,43 +438,14 @@ export const TopCommandBar: React.FC = () => {
               )}
             </div>
 
-            {!isStandalonePwa && installPrompt && (
-              <button
-                type="button"
-                className="hk-btn sm primary"
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => void handleInstallPwa()}
-              >
-                📲 Install Housekeeping App
-              </button>
-            )}
-            {!isStandalonePwa &&
-              isInsecureRemoteOrigin &&
-              tailscalePwa?.ServeConfigured &&
-              tailscalePwa.HttpsPwaUrl && (
-                <a
-                  href={tailscalePwa.HttpsPwaUrl}
-                  className="hk-btn sm primary"
-                  style={{ textDecoration: 'none', width: '100%', justifyContent: 'center' }}
-                >
-                  🔒 Switch to Trusted HTTPS (PWA)
-                </a>
-              )}
-            {!isStandalonePwa &&
-              isInsecureRemoteOrigin &&
-              (!tailscalePwa?.ServeConfigured || !tailscalePwa.HttpsPwaUrl) && (
-                <button
-                  type="button"
-                  className="hk-btn sm"
-                  style={{ width: '100%', justifyContent: 'center' }}
-                  onClick={() => {
-                    setMobileControlsOpen(false);
-                    openWebSettingsSubtab();
-                  }}
-                >
-                  📱 Setup HTTPS PWA
-                </button>
-              )}
+            <TopBarPwaControls
+              isAuthenticated={Boolean(authStatus?.isAuthenticated)}
+              variant="mobile"
+              onOpenWebSettings={() => {
+                setMobileControlsOpen(false);
+                openWebSettingsSubtab();
+              }}
+            />
 
             <div className="hk-mobile-sheet-grid">
               <button
@@ -697,7 +586,7 @@ export const TopCommandBar: React.FC = () => {
         </p>
         <div className="hk-row" style={{ justifyContent: 'flex-end' }}>
           <a
-            href="/api/v1/profiles/export?sanitize=true"
+            href={resolveApiV1Url('/profiles/export?sanitize=true')}
             className="hk-btn primary"
             style={{ textDecoration: 'none' }}
             onClick={() => setExportModalOpen(false)}
@@ -705,7 +594,7 @@ export const TopCommandBar: React.FC = () => {
             🛡 Export Shareable (Sanitized)
           </a>
           <a
-            href="/api/v1/profiles/export?sanitize=false"
+            href={resolveApiV1Url('/profiles/export?sanitize=false')}
             className="hk-btn"
             style={{ textDecoration: 'none' }}
             onClick={() => setExportModalOpen(false)}

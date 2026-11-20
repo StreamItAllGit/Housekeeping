@@ -16,6 +16,7 @@ import type {
   VerbosityLevel,
 } from '../types/models';
 import { SettingsIntegrationsAndDoctorCard } from './settings/SettingsIntegrationsAndDoctorCard';
+import { SettingsTailscalePwaCard } from './settings/SettingsTailscalePwaCard';
 
 type SettingsSection =
   | 'tools'
@@ -68,7 +69,6 @@ export const SettingsPage: React.FC = () => {
   const [fleetStatus, setFleetStatus] = useState<Record<string, RemoteNodeConfig>>({});
   const [probingFleet, setProbingFleet] = useState(false);
   const [tailscalePwa, setTailscalePwa] = useState<TailscalePwaStatusDto | null>(null);
-  const [tailscaleBusy, setTailscaleBusy] = useState(false);
   const [doctorBusy, setDoctorBusy] = useState(false);
 
   useEffect(() => {
@@ -79,27 +79,12 @@ export const SettingsPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (section !== 'web' && section !== 'doctor') return;
-    let active = true;
-    const loadTs = () => {
-      apiClient
-        .getTailscalePwaStatus()
-        .then((res) => {
-          if (active) setTailscalePwa(res);
-        })
-        .catch((err) => console.debug('[SettingsPage] Tailscale status probe failed:', err));
-    };
-    loadTs();
-
-    let timer: number | undefined;
-    if (tailscalePwa?.PendingAuthUrl && !tailscalePwa.ServeConfigured) {
-      timer = window.setInterval(loadTs, 4000);
-    }
-    return () => {
-      active = false;
-      if (timer) window.clearInterval(timer);
-    };
-  }, [section, tailscalePwa?.PendingAuthUrl, tailscalePwa?.ServeConfigured]);
+    if (section !== 'doctor') return;
+    apiClient
+      .getTailscalePwaStatus()
+      .then((res) => setTailscalePwa(res))
+      .catch((err) => console.debug('[SettingsPage] Tailscale status probe failed:', err));
+  }, [section]);
 
   if (!config) {
     return <div className="hk-card">Loading Settings...</div>;
@@ -542,7 +527,7 @@ export const SettingsPage: React.FC = () => {
                 }}
               >
                 <strong>🤖 Fleet Watchdog &amp; Health Supervision:</strong> Windows service crash-recovery
-                and heartbeat monitoring are centrally managed by <code>Mother v1.0</code> via <code>mother.manifest.json</code>.
+                and heartbeat monitoring are centrally managed by <code>Mother</code> via <code>suite.manifest.json</code>.
               </div>
             </div>
           </div>
@@ -939,185 +924,12 @@ export const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="hk-card">
-          <div className="hk-card-header">
-            <div>
-              <h3 className="hk-card-title">📱 Mobile PWA &amp; Tailscale Serve HTTPS</h3>
-              <p className="hk-card-subtitle">
-                Android Chrome &amp; iOS Safari require a trusted <code>https://</code> certificate
-                to install Housekeeping as a standalone full-screen PWA. Tailscale Serve provisions
-                an automatic Let&apos;s Encrypt TLS certificate for your Tailnet hostname while
-                keeping LAN HTTP (<code>:{config.WebServer.Port}</code>) intact.
-              </p>
-            </div>
-            <div className="hk-row">
-              <span
-                className={`hk-pill ${
-                  tailscalePwa?.ServeConfigured
-                    ? 'ok'
-                    : tailscalePwa?.PendingAuthUrl
-                      ? 'warn'
-                      : ''
-                }`}
-              >
-                {tailscalePwa?.ServeConfigured
-                  ? 'HTTPS Active'
-                  : tailscalePwa?.PendingAuthUrl
-                    ? 'Awaiting Tailscale Auth'
-                    : tailscalePwa?.TailscaleAvailable
-                      ? 'HTTPS Not Configured'
-                      : 'Checking Tailscale...'}
-              </span>
-              <button
-                type="button"
-                className="hk-btn sm"
-                disabled={tailscaleBusy}
-                onClick={async () => {
-                  setTailscaleBusy(true);
-                  try {
-                    const res = await apiClient.getTailscalePwaStatus();
-                    setTailscalePwa(res);
-                  } catch (err) {
-                    showToast(err instanceof Error ? err.message : 'Status check failed.');
-                  } finally {
-                    setTailscaleBusy(false);
-                  }
-                }}
-              >
-                🔄 Refresh
-              </button>
-              <button
-                type="button"
-                className="hk-btn sm primary"
-                disabled={tailscaleBusy || tailscalePwa?.TailscaleAvailable === false}
-                onClick={async () => {
-                  setTailscaleBusy(true);
-                  try {
-                    const res = await apiClient.enableTailscalePwa();
-                    setTailscalePwa(res);
-                    showToast(res.StatusMessage);
-                  } catch (err) {
-                    showToast(err instanceof Error ? err.message : 'Failed to enable Tailscale Serve.');
-                  } finally {
-                    setTailscaleBusy(false);
-                  }
-                }}
-              >
-                {tailscaleBusy
-                  ? 'Provisioning...'
-                  : tailscalePwa?.ServeConfigured
-                    ? '⚡ Re-Apply Tailscale HTTPS'
-                    : '⚡ Enable Tailscale HTTPS (PWA)'}
-              </button>
-              {tailscalePwa?.ServeConfigured && (
-                <button
-                  type="button"
-                  className="hk-btn sm danger"
-                  disabled={tailscaleBusy}
-                  onClick={async () => {
-                    setTailscaleBusy(true);
-                    try {
-                      const res = await apiClient.disableTailscalePwa();
-                      setTailscalePwa(res);
-                      showToast('Reset Tailscale Serve HTTPS configuration.');
-                    } catch (err) {
-                      showToast(err instanceof Error ? err.message : 'Reset failed.');
-                    } finally {
-                      setTailscaleBusy(false);
-                    }
-                  }}
-                >
-                  Reset Serve
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              {tailscalePwa?.StatusMessage || 'Inspecting local Tailscale daemon...'}
-            </div>
-
-            {tailscalePwa?.PendingAuthUrl && !tailscalePwa.ServeConfigured && (
-              <div
-                style={{
-                  padding: '10px 12px',
-                  borderRadius: 8,
-                  border: '1px solid var(--warn)',
-                  background: 'rgba(245, 158, 11, 0.08)',
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  gap: 10,
-                }}
-              >
-                <div style={{ fontSize: 13 }}>
-                  <strong>One-Time Tailscale Authorization Required:</strong> Click to approve
-                  Tailscale Serve &amp; HTTPS Certificates on your tailnet. Housekeeping is
-                  listening in the background and will finish activating HTTPS automatically as soon
-                  as you click <strong>Enable</strong>.
-                </div>
-                <a
-                  href={tailscalePwa.PendingAuthUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="hk-btn sm primary"
-                  style={{ textDecoration: 'none' }}
-                >
-                  🔑 Authorize Tailscale Serve &amp; HTTPS ↗
-                </a>
-              </div>
-            )}
-
-            {tailscalePwa?.HttpsPwaUrl && (
-              <div className="hk-field">
-                <label className="hk-field-label">
-                  Android &amp; iOS Standalone PWA Install URL (MagicDNS HTTPS)
-                </label>
-                <div className="hk-row">
-                  <input
-                    type="text"
-                    readOnly
-                    className="hk-input mono"
-                    style={{ flex: 1 }}
-                    value={tailscalePwa.HttpsPwaUrl}
-                  />
-                  <button
-                    type="button"
-                    className="hk-btn sm"
-                    onClick={() => {
-                      if (!navigator.clipboard?.writeText) {
-                        showToast('Clipboard API unavailable in non-HTTPS context. Copy URL directly.');
-                        return;
-                      }
-                      void navigator.clipboard
-                        .writeText(tailscalePwa.HttpsPwaUrl)
-                        .then(() => showToast(`Copied ${tailscalePwa.HttpsPwaUrl} to clipboard.`))
-                        .catch((err) => {
-                          console.debug('[SettingsPage] PWA URL clipboard write failed:', err);
-                          showToast('Clipboard write blocked by browser. Copy URL directly.');
-                        });
-                    }}
-                  >
-                    📋 Copy URL
-                  </button>
-                  {tailscalePwa.ServeConfigured && (
-                    <a
-                      href={tailscalePwa.HttpsPwaUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="hk-btn sm success"
-                      style={{ textDecoration: 'none' }}
-                    >
-                      🔒 Open HTTPS PWA ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+        <SettingsTailscalePwaCard
+          port={config.WebServer.Port}
+          tailscalePwa={tailscalePwa}
+          onStatusChange={setTailscalePwa}
+          showToast={showToast}
+        />
         </div>
       )}
 
@@ -1263,7 +1075,7 @@ export const SettingsPage: React.FC = () => {
                   className="hk-input mono"
                   value={config.DiscordWebhookUrl}
                   onChange={(e) => updateConfig((d) => (d.DiscordWebhookUrl = e.target.value))}
-                  placeholder="https://discord.com/api/webhooks/..."
+                  placeholder="Paste Discord webhook URL (e.g. https://discord.example.invalid/webhooks/id/token)"
                 />
               </div>
 

@@ -25,6 +25,7 @@ import type {
   TerminalLogEntry,
 } from '../types/models';
 import { createCoexistenceAndSystemApi } from './coexistenceAndSystemApi';
+import { resolveApiV1Url } from '../utils/subpathUrl';
 
 export class ApiHttpError extends Error {
   status: number;
@@ -64,7 +65,7 @@ async function requestJson<T>(
     headers.set('X-Target-Node-Id', currentTargetNodeId);
   }
 
-  const resp = await fetch(`/api/v1${path}`, {
+  const resp = await fetch(resolveApiV1Url(path), {
     ...options,
     headers,
     credentials: 'same-origin',

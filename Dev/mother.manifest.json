@@ -3,46 +3,16 @@
   "schemaVersion": 2,
   "manifestType": "suite-app",
   "appId": "housekeeping",
-  "version": "0.1.12-hf.1",
-  "updatedAtUtc": "2026-11-15T20:00:00Z",
+  "id": "housekeeping",
+  "version": "0.2.0",
+  "updatedAtUtc": "2026-11-20T00:00:00.000Z",
   "suiteId": "mother",
   "port": 5178,
   "httpsPort": 8478,
-  "coexistenceStatusEndpoint": "/api/v1/coexistence/status",
-  "schema_version": "1.0",
-  "app_id": "housekeeping",
-  "id": "housekeeping",
   "display_name": "Housekeeping",
   "brand_accent": "#f59e0b",
-  "archetype": "companion_daemon",
-  "app_user_model_id": "StreamItAll.Housekeeping",
-  "default_port": 5178,
-  "https_port": 8478,
-  "health_endpoint": "/api/v1/system/health",
-  "single_tray_mutex": "Global\\Mother_Supervisor_Active",
+  "health_endpoint": "/api/v1/health",
+  "single_tray_mutex": "Global\\Mother_Housekeeping_Mutex",
   "managed_env_var": "HOUSEKEEPING_MANAGED_BY_MOTHER",
-  "commands": {
-    "start": ["scripts/start-daemon.bat", "--managed-by-mother"],
-    "stop": ["scripts/stop-daemon.bat"],
-    "restart": ["scripts/start-daemon.bat", "--managed-by-mother"],
-    "status": ["scripts/status-check.bat"],
-    "open": ["Housekeeping.exe"],
-    "backup": ["scripts/backup-now.bat"]
-  },
-  "endpoints": {
-    "health": "http://127.0.0.1:5178/api/v1/system/health",
-    "status": "http://127.0.0.1:5178/api/v1/pipeline/state",
-    "coexistence_status": "http://127.0.0.1:5178/api/v1/coexistence/status",
-    "telemetry": "http://127.0.0.1:5178/api/v1/system/telemetry",
-    "scheduler_status": "http://127.0.0.1:5178/api/v1/scheduler/status",
-    "scheduler_defer": "http://127.0.0.1:5178/api/v1/scheduler/defer",
-    "shutdown": "http://127.0.0.1:5178/api/v1/system/shutdown"
-  },
-  "paths": {
-    "data_dir": "data",
-    "config_dir": "data",
-    "log_dir": "logs",
-    "crashes_dir": "logs/crashes",
-    "backups_dir": "backups"
-  }
+  "note": "Thin Dev legacy compatibility shim; canonical Mother v2 manifest is suite.manifest.json."
 }

@@ -12,7 +12,9 @@ import type {
   RemoteNodeConfig,
   RunHistoryEntry,
   TailscalePwaStatusDto,
+  TailscaleQrDto,
 } from '../types/models';
+import { resolveApiV1Url } from '../utils/subpathUrl';
 
 export type RequestJsonFn = <T>(
   path: string,
@@ -107,6 +109,8 @@ export function createCoexistenceAndSystemApi(requestJson: RequestJsonFn) {
     // Tailscale Serve HTTPS & Mobile PWA
     getTailscalePwaStatus: () =>
       requestJson<TailscalePwaStatusDto>('/system/tailscale-pwa', { bypassNodeProxy: true }),
+    getTailscaleQr: () =>
+      requestJson<TailscaleQrDto>('/system/tailscale-qr', { bypassNodeProxy: true }),
     enableTailscalePwa: () =>
       requestJson<TailscalePwaStatusDto>('/system/tailscale-pwa/enable', {
         method: 'POST',
@@ -141,7 +145,7 @@ export function createCoexistenceAndSystemApi(requestJson: RequestJsonFn) {
         }>;
       }>('/system/doctor/diagnostics', { bypassNodeProxy: true }),
     exportDiagnosticBundle: async () => {
-      const resp = await fetch('/api/v1/system/doctor/export-bundle', {
+      const resp = await fetch(resolveApiV1Url('/system/doctor/export-bundle'), {
         method: 'POST',
         credentials: 'same-origin',
       });

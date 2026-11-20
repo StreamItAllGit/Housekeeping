@@ -1,11 +1,18 @@
+// @module: Housekeeping.Server.Services.TailscalePwaService
+// @purpose: Inspects Tailscale MagicDNS/HTTPS readiness, manages `tailscale serve --bg`, and renders offline ISO/IEC 18004 SVG QR payloads via Foundation.Core.QrCodeEncoder.
+// @depends-on: System, System.Diagnostics, System.Linq, System.Text, System.Text.Json, System.Text.Json.Serialization, System.Text.RegularExpressions, System.Threading, System.Threading.Tasks, Foundation.Core
+// @exports: TailscalePwaStatusDto, TailscaleQrResultDto, TailscalePwaService
+
 using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Foundation.Core;
 
 namespace Housekeeping.Server.Services
 {
@@ -18,10 +25,24 @@ namespace Housekeeping.Server.Services
         public bool HttpsCertsEnabled { get; set; }
         public bool ServeConfigured { get; set; }
         public string HttpsPwaUrl { get; set; } = "";
+        public string MotherHttpsPwaUrl { get; set; } = "";
         public string PendingAuthUrl { get; set; } = "";
         public string ServeSummary { get; set; } = "";
         public string StatusMessage { get; set; } = "";
         public bool Simulated { get; set; }
+    }
+
+    public sealed class TailscaleQrResultDto
+    {
+        [JsonPropertyName("directUrl")] public string DirectUrl { get; set; } = "";
+        [JsonPropertyName("directQrSvg")] public string DirectQrSvg { get; set; } = "";
+        [JsonPropertyName("motherUrl")] public string MotherUrl { get; set; } = "";
+        [JsonPropertyName("motherQrSvg")] public string MotherQrSvg { get; set; } = "";
+        [JsonPropertyName("httpsPwaUrl")] public string HttpsPwaUrl { get; set; } = "";
+        [JsonPropertyName("tailscaleAvailable")] public bool TailscaleAvailable { get; set; }
+        [JsonPropertyName("serveConfigured")] public bool ServeConfigured { get; set; }
+        [JsonPropertyName("dnsName")] public string DnsName { get; set; } = "";
+        [JsonPropertyName("statusMessage")] public string StatusMessage { get; set; } = "";
     }
 
     /// <summary>
@@ -118,6 +139,10 @@ namespace Housekeeping.Server.Services
                 }
 
                 dto.StatusMessage = $"Tailscale Serve HTTPS is active at {dto.HttpsPwaUrl}";
+                if (!string.IsNullOrWhiteSpace(dto.DnsName))
+                {
+                    dto.MotherHttpsPwaUrl = $"https://{dto.DnsName}/app/housekeeping/";
+                }
                 return dto;
             }
 
@@ -130,6 +155,7 @@ namespace Housekeeping.Server.Services
             if (!string.IsNullOrWhiteSpace(dto.DnsName))
             {
                 dto.HttpsPwaUrl = $"https://{dto.DnsName}";
+                dto.MotherHttpsPwaUrl = $"https://{dto.DnsName}/app/housekeeping/";
             }
 
             if (!string.IsNullOrWhiteSpace(dto.PendingAuthUrl))
@@ -259,6 +285,55 @@ namespace Housekeeping.Server.Services
             await RunCliBoundedAsync("serve reset", 5000, ct);
             return await GetStatusAsync(localPort, ct);
         }
+
+        public static string RenderQrSvg(string payload, string ariaLabel = "Housekeeping PWA QR code")
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+            return QrCodeEncoder.RenderSvg(
+                payload.Trim(),
+                darkColor: "#0b0e14",
+                lightColor: "#ffffff",
+                quietZoneModules: 4,
+                ariaLabel: ariaLabel);
+        }
+
+        public async Task<TailscaleQrResultDto> BuildQrReportAsync(
+            int localPort,
+            string? customUrl = null,
+            string? requestOrigin = null,
+            string? motherGatewayOrigin = null,
+            CancellationToken ct = default)
+        {
+            if (localPort <= 0 || localPort > 65535) localPort = 5178;
+            var status = await GetStatusAsync(localPort, ct);
+
+            string directUrl = FirstNonEmpty(customUrl)?.Trim()
+                ?? (FirstNonEmpty(status.HttpsPwaUrl) is { } h ? h.TrimEnd('/') + "/" : null)
+                ?? (FirstNonEmpty(status.TailscaleIp) is { } ip ? $"http://{ip}:{localPort}/" : null)
+                ?? (FirstNonEmpty(requestOrigin) is { } orig ? orig.TrimEnd('/') + "/" : null)
+                ?? $"http://127.0.0.1:{localPort}/";
+
+            string motherUrl = FirstNonEmpty(status.MotherHttpsPwaUrl)
+                ?? (FirstNonEmpty(status.DnsName) is { } dns ? $"https://{dns}/app/housekeeping/" : null)
+                ?? (FirstNonEmpty(motherGatewayOrigin) is { } mg ? mg.TrimEnd('/') + "/app/housekeeping/" : null)
+                ?? (FirstNonEmpty(status.TailscaleIp) is { } tip ? $"http://{tip}:5100/app/housekeeping/" : null)
+                ?? "http://127.0.0.1:5100/app/housekeeping/";
+
+            return new TailscaleQrResultDto
+            {
+                DirectUrl = directUrl,
+                DirectQrSvg = RenderQrSvg(directUrl, "Housekeeping direct access QR code"),
+                MotherUrl = motherUrl,
+                MotherQrSvg = RenderQrSvg(motherUrl, "Housekeeping Mother subpath PWA QR code"),
+                HttpsPwaUrl = status.HttpsPwaUrl,
+                TailscaleAvailable = status.TailscaleAvailable,
+                ServeConfigured = status.ServeConfigured,
+                DnsName = status.DnsName,
+                StatusMessage = status.StatusMessage
+            };
+        }
+
+        private static string? FirstNonEmpty(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
         private void RegisterPendingAuthProcess(Process proc, string authUrl)
         {

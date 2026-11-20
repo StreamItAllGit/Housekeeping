@@ -97,9 +97,22 @@ export interface TailscalePwaStatusDto {
   HttpsCertsEnabled: boolean;
   ServeConfigured: boolean;
   HttpsPwaUrl: string;
+  MotherHttpsPwaUrl?: string;
   PendingAuthUrl: string;
   ServeSummary: string;
   StatusMessage: string;
+}
+
+export interface TailscaleQrDto {
+  directUrl: string;
+  directQrSvg: string;
+  motherUrl: string;
+  motherQrSvg: string;
+  httpsPwaUrl: string;
+  tailscaleAvailable: boolean;
+  serveConfigured: boolean;
+  dnsName: string;
+  statusMessage: string;
 }
 
 export interface FsDriveItem {

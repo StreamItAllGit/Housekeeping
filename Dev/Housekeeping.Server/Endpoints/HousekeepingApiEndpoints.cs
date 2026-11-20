@@ -39,70 +39,17 @@ namespace Housekeeping.Server.Endpoints
     public sealed record RemoteNodeActionPayload(string? Action, string? QueueId, string? JobId);
     public sealed record ProfileImportPayload(string? Json);
     public sealed record ResumeInterruptedPayload(bool RestartFullQueue = false);
-    public sealed record DeferSchedulerPayload(int Minutes = 15);
 
     public static partial class HousekeepingApiEndpoints
     {
+        public static void MapHousekeepingEndpoints(this WebApplication app) => app.MapHousekeepingApi();
+
         public static void MapHousekeepingApi(this WebApplication app)
         {
             var api = app.MapGroup("/api/v1");
             app.MapCoexistenceAndControlEndpoints(api);
             app.MapSystemDoctorAndBackupEndpoints(api);
-
-            // ==================== MOTHER DISK ARBITRATION HOOKS ==================== //
-            var getSchedulerStatus = (HousekeepingRuntimeContainer rt) =>
-            {
-                var snapshot = rt.Orchestrator.GetStateSnapshot();
-                return Results.Ok(new
-                {
-                    app = "housekeeping",
-                    version = RemoteNodeDeploymentService.GetLocalAppVersion(),
-                    isRunning = snapshot.IsRunning,
-                    isPaused = snapshot.IsPaused,
-                    activeJobName = snapshot.ActiveJobName,
-                    activeQueueId = snapshot.ActiveQueueId,
-                    deferredUntilUtc = rt.Orchestrator.Scheduler.DeferredUntilUtc,
-                    isDiskHeavyJobActive = snapshot.IsRunning,
-                    globalNextRunStatusText = snapshot.GlobalNextRunStatusText,
-                    globalNextRunUtc = snapshot.GlobalNextRunUtc,
-                    timestampUtc = DateTime.UtcNow
-                });
-            };
-
-            var postSchedulerDefer = (DeferSchedulerPayload? body, HousekeepingRuntimeContainer rt) =>
-            {
-                int minutes = body?.Minutes ?? 15;
-                if (minutes <= 0)
-                {
-                    rt.Orchestrator.Scheduler.ClearDeferral();
-                    rt.Orchestrator.Log("INFO", "[Scheduler] Schedule deferral cleared by external coordinator.");
-                    return Results.Ok(new
-                    {
-                        ok = true,
-                        app = "housekeeping",
-                        deferredMinutes = 0,
-                        deferredUntilUtc = (DateTime?)null,
-                        message = "Schedule deferral cleared."
-                    });
-                }
-
-                rt.Orchestrator.Scheduler.DeferSchedules(TimeSpan.FromMinutes(minutes));
-                var until = rt.Orchestrator.Scheduler.DeferredUntilUtc;
-                rt.Orchestrator.Log("INFO", $"[Scheduler] Schedules deferred for {minutes}m (until {until:yyyy-MM-dd HH:mm:ss} UTC) by disk arbitration.");
-                return Results.Ok(new
-                {
-                    ok = true,
-                    app = "housekeeping",
-                    deferredMinutes = minutes,
-                    deferredUntilUtc = until,
-                    message = $"Schedules deferred until {until:yyyy-MM-dd HH:mm:ss} UTC."
-                });
-            };
-
-            app.MapGet("/api/scheduler/status", getSchedulerStatus);
-            app.MapPost("/api/scheduler/defer", postSchedulerDefer);
-            api.MapGet("/scheduler/status", getSchedulerStatus);
-            api.MapPost("/scheduler/defer", postSchedulerDefer);
+            app.MapMotherAndQrEndpoints(api);
 
             // ==================== 1. HEALTH & BOOTSTRAP ==================== //
             api.MapGet("/health", (HousekeepingRuntimeContainer rt) => Results.Ok(new
@@ -1257,53 +1204,6 @@ namespace Housekeeping.Server.Endpoints
             {
                 rt.Orchestrator.Log("INFO", "[Notification Test] Dispatched system tray / browser notification test.");
                 return Results.Ok(new { ok = true, message = "Housekeeping Notification Test succeeded!" });
-            });
-
-            // ==================== 11. TAILSCALE SERVE HTTPS & MOBILE PWA ==================== //
-            api.MapGet("/system/tailscale-pwa", async (HousekeepingRuntimeContainer rt, TailscalePwaService tsPwa, CancellationToken ct) =>
-            {
-                int port = rt.ConfigService.Config.WebServer.Port;
-                var status = await tsPwa.GetStatusAsync(port, ct);
-                return Results.Ok(status);
-            });
-
-            api.MapPost("/system/tailscale-pwa/enable", async (HousekeepingRuntimeContainer rt, TailscalePwaService tsPwa, CancellationToken ct) =>
-            {
-                int port = rt.ConfigService.Config.WebServer.Port;
-                if (rt.ConfigService.IsIsolatedOverride)
-                {
-                    return Results.Ok(new TailscalePwaStatusDto
-                    {
-                        Simulated = true,
-                        StatusMessage = "[Isolated] Tailscale Serve host mutation is suppressed in isolated mode."
-                    });
-                }
-                var status = await tsPwa.EnableHttpsServeAsync(port, ct);
-                if (status.ServeConfigured)
-                {
-                    rt.Orchestrator.Log("SUCCESS", $"[Tailscale PWA] Enabled HTTPS Serve proxy at {status.HttpsPwaUrl}");
-                }
-                else if (!string.IsNullOrWhiteSpace(status.PendingAuthUrl))
-                {
-                    rt.Orchestrator.Log("WARN", $"[Tailscale PWA] One-time Tailscale Serve authorization required: {status.PendingAuthUrl}");
-                }
-                return Results.Ok(status);
-            });
-
-            api.MapPost("/system/tailscale-pwa/disable", async (HousekeepingRuntimeContainer rt, TailscalePwaService tsPwa, CancellationToken ct) =>
-            {
-                int port = rt.ConfigService.Config.WebServer.Port;
-                if (rt.ConfigService.IsIsolatedOverride)
-                {
-                    return Results.Ok(new TailscalePwaStatusDto
-                    {
-                        Simulated = true,
-                        StatusMessage = "[Isolated] Tailscale Serve host mutation is suppressed in isolated mode."
-                    });
-                }
-                var status = await tsPwa.DisableHttpsServeAsync(port, ct);
-                rt.Orchestrator.Log("INFO", "[Tailscale PWA] Reset local tailscale serve HTTPS proxy configuration.");
-                return Results.Ok(status);
             });
         }
 
