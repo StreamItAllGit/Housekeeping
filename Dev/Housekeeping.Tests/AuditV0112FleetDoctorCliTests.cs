@@ -68,14 +68,14 @@ namespace Housekeeping.Tests
             Directory.CreateDirectory(legacyRoot);
             try
             {
-                File.WriteAllText(Path.Combine(cleanRoot, "app", "version.txt"), "0.1.12-hf.1");
+                File.WriteAllText(Path.Combine(cleanRoot, "app", "version.txt"), "0.2.0");
                 File.WriteAllText(Path.Combine(cleanRoot, "data", "settings.json"), "{\"ConfigVersion\":4}");
 
                 Assert.False(RemoteNodeDeploymentService.IsLegacyFlatRemoteRoot(cleanRoot));
                 Assert.Equal(Path.Combine(cleanRoot, "app"), RemoteNodeDeploymentService.ResolveRemoteBinaryDir(cleanRoot));
                 Assert.Equal(Path.Combine(cleanRoot, "data", "settings.json"), RemoteNodeDeploymentService.ResolveRemoteSettingsReadPath(cleanRoot));
                 Assert.Equal(Path.Combine(cleanRoot, "data", "settings.json"), RemoteNodeDeploymentService.ResolveRemoteSettingsWritePath(cleanRoot));
-                Assert.Equal("0.1.12-hf.1", RemoteNodeDeploymentService.DetectRemoteAppVersionFromDisk(cleanRoot));
+                Assert.Equal("0.2.0", RemoteNodeDeploymentService.DetectRemoteAppVersionFromDisk(cleanRoot));
 
                 // Legacy flat node fallback
                 File.WriteAllText(Path.Combine(legacyRoot, "settings.json"), "{\"ConfigVersion\":4}");

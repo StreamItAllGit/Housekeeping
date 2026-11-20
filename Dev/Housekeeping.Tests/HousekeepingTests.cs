@@ -46,7 +46,7 @@ namespace Housekeeping.Tests
         {
             var cfg = AppConfig.CreateDefaults();
             cfg.HumbleSync.SessionCookie = "secret_cookie_123";
-            cfg.DiscordWebhookUrl = "https://discord.com/api/webhooks/secret";
+            cfg.DiscordWebhookUrl = "https://discord.example.invalid/api/webhooks/000000000000000000/placeholder-token";
             cfg.ProxyGenerator.Folders.Add(new FolderTargetItem { Enabled = true, Path = @"C:\Videos\Edit" });
 
             var sanitized = cfg.CreateSanitizedCopyForSharing();
@@ -1745,9 +1745,9 @@ game (
             Assert.Equal(Environment.MachineName, defaultIdentifier);
 
             // Custom machine tag
-            cfg.DiscordCustomMachineName = "STREAM-SERVER-01";
+            cfg.DiscordCustomMachineName = "TEST-SERVER-01";
             string customIdentifier = scheduler.GetMachineIdentifier();
-            Assert.Equal("STREAM-SERVER-01", customIdentifier);
+            Assert.Equal("TEST-SERVER-01", customIdentifier);
         }
 
         [Fact]
@@ -1830,7 +1830,7 @@ game (
             };
 
             string sample = "Breaking Bad - S01E01 - Pilot [1080p Remux].mkv";
-            var parsed = CollectionManifestModule.ApplyFieldParseRules(sample, sample, @"C:\Media\" + sample, rules);
+            var parsed = CollectionManifestModule.ApplyFieldParseRules(sample, sample, Path.Combine(Path.GetTempPath(), "hk_media", sample), rules);
 
             Assert.Equal("Breaking Bad", parsed["ShowTitle"]);
             Assert.Equal("01", parsed["Season"]);
@@ -1886,7 +1886,8 @@ game (
             // Sample 1: Master Set item with company & platform in path
             string rel1 = @"Master Set\Nintendo\SNES\A\A.S.P. - Air Strike Patrol (USA).7z";
             string file1 = "A.S.P. - Air Strike Patrol (USA).7z";
-            var parsed1 = CollectionManifestModule.ApplyFieldParseRules(file1, rel1, @"E:\Sets\" + rel1, rules);
+            string setsRoot = Path.Combine(Path.GetTempPath(), "hk_sets");
+            var parsed1 = CollectionManifestModule.ApplyFieldParseRules(file1, rel1, Path.Combine(setsRoot, rel1), rules);
 
             Assert.Equal("A.S.P. - Air Strike Patrol", parsed1["GameTitle"]);
             Assert.Equal("USA", parsed1["Region"]);
@@ -1895,7 +1896,7 @@ game (
 
             // Sample 2: Complex disc number, revision, and dump tag
             string file2 = "Final Fantasy VII (USA) (Disc 1) (Rev A) [!].chd";
-            var parsed2 = CollectionManifestModule.ApplyFieldParseRules(file2, file2, @"E:\Sets\PS1\" + file2, rules);
+            var parsed2 = CollectionManifestModule.ApplyFieldParseRules(file2, file2, Path.Combine(setsRoot, "PS1", file2), rules);
 
             Assert.Equal("USA", parsed2["Region"]);
             Assert.Equal("Disc 1", parsed2["DiscNumber"]);
@@ -1904,7 +1905,7 @@ game (
 
             // Sample 3: Rom hack with hack name and version
             string file3 = "Pokemon Crystal - Legacy (1.3.1).zip";
-            var parsed3 = CollectionManifestModule.ApplyFieldParseRules(file3, file3, @"E:\Sets\RomHacks\" + file3, rules);
+            var parsed3 = CollectionManifestModule.ApplyFieldParseRules(file3, file3, Path.Combine(setsRoot, "RomHacks", file3), rules);
 
             Assert.Equal("Pokemon Crystal", parsed3["RomHackOriginalGame"]);
             Assert.Equal("Legacy", parsed3["RomHackName"]);
@@ -1912,7 +1913,7 @@ game (
 
             // Sample 4: Launcher batch file
             string file4 = "Super Mario World - Launcher.bat";
-            var parsed4 = CollectionManifestModule.ApplyFieldParseRules(file4, file4, @"E:\Sets\Launchers\" + file4, rules);
+            var parsed4 = CollectionManifestModule.ApplyFieldParseRules(file4, file4, Path.Combine(setsRoot, "Launchers", file4), rules);
 
             Assert.Equal("True", parsed4["IsLauncher"]);
         }
