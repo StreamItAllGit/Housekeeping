@@ -334,14 +334,14 @@ namespace Housekeeping.Tests
             using (var req = new HttpRequestMessage(HttpMethod.Get, "/api/v1/auth/status"))
             {
                 req.Headers.TryAddWithoutValidation("X-Forwarded-For", "100.64.10.20");
-                req.Headers.TryAddWithoutValidation("Tailscale-User-Login", "user@tailnet.example.invalid");
+                req.Headers.TryAddWithoutValidation("Tailscale-User-Login", "operator@example.invalid");
                 using var resp = await server.Client.SendAsync(req);
                 resp.EnsureSuccessStatusCode();
                 using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
                 Assert.True(doc.RootElement.GetProperty("isAuthenticated").GetBoolean());
                 Assert.True(doc.RootElement.GetProperty("isTailscaleServe").GetBoolean());
                 Assert.Equal("TailscaleServe", doc.RootElement.GetProperty("authMethod").GetString());
-                Assert.Equal("user@tailnet.example.invalid", doc.RootElement.GetProperty("identity").GetString());
+                Assert.Equal("operator@example.invalid", doc.RootElement.GetProperty("identity").GetString());
             }
 
             // Disable TrustTailscaleServeHeaders -> same proxied request is no longer auto-trusted
@@ -351,7 +351,7 @@ namespace Housekeeping.Tests
             using (var req2 = new HttpRequestMessage(HttpMethod.Get, "/api/v1/config"))
             {
                 req2.Headers.TryAddWithoutValidation("X-Forwarded-For", "100.64.10.20");
-                req2.Headers.TryAddWithoutValidation("Tailscale-User-Login", "user@tailnet.example.invalid");
+                req2.Headers.TryAddWithoutValidation("Tailscale-User-Login", "operator@example.invalid");
                 using var resp2 = await server.Client.SendAsync(req2);
                 Assert.Equal(HttpStatusCode.Unauthorized, resp2.StatusCode);
             }
@@ -518,7 +518,7 @@ namespace Housekeeping.Tests
             await using var server = await LiveServerHarness.StartAsync();
             var cfg = await server.FetchConfigAsync();
             cfg.HumbleSync.SessionCookie = "humble_secret_session_999";
-            cfg.DiscordWebhookUrl = "https://discord.com/api/webhooks/secret_hook";
+            cfg.DiscordWebhookUrl = "https://discord.example.invalid/api/webhooks/000000000000000000/placeholder_hook";
             cfg.GreenroomIntegration.CompanionBearerToken = "gr_bearer_secret";
             cfg.RemoteNodes.Add(new RemoteNodeConfig
             {
@@ -535,7 +535,7 @@ namespace Housekeeping.Tests
             // Export sanitized profile
             string sanitizedJson = await server.Client.GetStringAsync("/api/v1/profiles/export?sanitize=true");
             Assert.DoesNotContain("humble_secret_session_999", sanitizedJson);
-            Assert.DoesNotContain("secret_hook", sanitizedJson);
+            Assert.DoesNotContain("placeholder_hook", sanitizedJson);
             Assert.DoesNotContain("gr_bearer_secret", sanitizedJson);
             Assert.DoesNotContain("remote_node_secret_token", sanitizedJson);
             Assert.Contains(@"V:\\RawFootage", sanitizedJson);

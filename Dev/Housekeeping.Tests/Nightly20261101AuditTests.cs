@@ -16,7 +16,7 @@ namespace Housekeeping.Tests
             var job = new CloudSyncJobItem
             {
                 JobName = "Emu Sync",
-                LocalPath = @"E:\Sets\EmuDrive",
+                LocalPath = Path.Combine(Path.GetTempPath(), "hk_sets", "EmuDrive"),
                 RemoteTarget = "EmuDrive:",
                 SyncMode = "bisync",
                 Flags = "--create-empty-src-dirs --resilient --verbose"

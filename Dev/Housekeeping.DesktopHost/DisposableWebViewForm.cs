@@ -3,7 +3,10 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
+using Foundation.Core;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -22,12 +25,19 @@ namespace Housekeeping.DesktopHost
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
+        private static int _loaderDllConfigured;
+
         private WebView2? _webView;
         private readonly string _initialUrl;
         private readonly int _localServerPort;
         private readonly string? _customUserDataRoot;
         private readonly Action<string>? _onFallbackToBrowser;
         private bool _isCoreReady;
+
+#if DEBUG || HOUSEKEEPING_TEST_AUTOMATION
+        private WebViewAutomationKeySubClass? _webViewKeyHook;
+        internal WebView2? WebViewControl => _webView;
+#endif
 
         public DisposableWebViewForm(
             string initialUrl,
@@ -41,6 +51,7 @@ namespace Housekeeping.DesktopHost
             _customUserDataRoot = customUserDataRoot;
             _onFallbackToBrowser = onFallbackToBrowser;
 
+            Name = "HousekeepingMainForm";
             Text = "Housekeeping";
             Size = new Size(1480, 930);
             MinimumSize = new Size(920, 620);
@@ -55,11 +66,18 @@ namespace Housekeeping.DesktopHost
 
             _webView = new WebView2
             {
+                Name = "HousekeepingWebView",
                 Dock = DockStyle.Fill,
                 DefaultBackgroundColor = Color.FromArgb(9, 14, 23)
             };
 
             Controls.Add(_webView);
+
+#if DEBUG || HOUSEKEEPING_TEST_AUTOMATION
+            _webView.HandleCreated += (_, _) => AttachWebViewKeyHook();
+            _webView.HandleDestroyed += (_, _) => DetachWebViewKeyHook();
+            DesktopAutomationBridge.RegisterForm(this);
+#endif
         }
 
         protected override void OnHandleCreated(EventArgs e)
@@ -75,10 +93,18 @@ namespace Housekeeping.DesktopHost
 
             try
             {
+                string archFolder = Environment.Is64BitProcess ? "win-x64" : "win-x86";
+                string nativeLoaderDir = Path.Combine(AppContext.BaseDirectory, "runtimes", archFolder, "native");
+                if (File.Exists(Path.Combine(nativeLoaderDir, "WebView2Loader.dll")) &&
+                    Interlocked.Exchange(ref _loaderDllConfigured, 1) == 0)
+                {
+                    CoreWebView2Environment.SetLoaderDllFolderPath(nativeLoaderDir);
+                }
+
                 string userDataDir = !string.IsNullOrWhiteSpace(_customUserDataRoot)
                     ? Path.Combine(Path.GetFullPath(_customUserDataRoot), "webview2_cache")
                     : Path.Combine(
-                        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                        KnownFolderPaths.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                         "Housekeeping",
                         "webview2_cache");
                 Directory.CreateDirectory(userDataDir);
@@ -95,12 +121,18 @@ namespace Housekeeping.DesktopHost
                 _webView.CoreWebView2.Settings.IsStatusBarEnabled = false;
                 _webView.CoreWebView2.NewWindowRequested += HandleNewWindowRequested;
                 _webView.Source = new Uri(_initialUrl);
+#if DEBUG || HOUSEKEEPING_TEST_AUTOMATION
+                DesktopAutomationBridge.NotifyWebViewReady(this);
+#endif
             }
             catch (Exception ex)
             {
                 string fallbackUrl = _initialUrl;
                 _onFallbackToBrowser?.Invoke($"WebView2 Runtime unavailable ({ex.Message}); opening in default browser.");
-                OpenExternalUrl(fallbackUrl);
+                if (!ShouldSuppressExternalLaunch())
+                {
+                    OpenExternalUrl(fallbackUrl);
+                }
                 if (!IsDisposed)
                 {
                     Close();
@@ -145,13 +177,20 @@ namespace Housekeeping.DesktopHost
                 if (!isSameLocalServer)
                 {
                     e.Handled = true;
-                    OpenExternalUrl(e.Uri);
+                    if (!ShouldSuppressExternalLaunch())
+                    {
+                        OpenExternalUrl(e.Uri);
+                    }
                 }
             }
         }
 
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
+#if DEBUG || HOUSEKEEPING_TEST_AUTOMATION
+            DetachWebViewKeyHook();
+            DesktopAutomationBridge.UnregisterForm(this);
+#endif
             var view = _webView;
             _webView = null;
             _isCoreReady = false;
@@ -180,6 +219,105 @@ namespace Housekeeping.DesktopHost
             // Reclaim managed wrapper references promptly after WebView2 subprocess teardown
             GC.Collect();
             GC.WaitForPendingFinalizers();
+        }
+
+#if DEBUG || HOUSEKEEPING_TEST_AUTOMATION
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x0100 && DesktopAutomationBridge.HandleAutomationKeyDown(this, m.WParam.ToInt32()))
+            {
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        internal void EnableAutomationViewportControl()
+        {
+            if (!IsDisposed)
+            {
+                MinimumSize = new Size(360, 540);
+            }
+        }
+
+        internal void ApplyAutomationViewport(int width, int height)
+        {
+            if (IsDisposed) return;
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action(() => ApplyAutomationViewport(width, height)));
+                return;
+            }
+
+            EnableAutomationViewportControl();
+            if (WindowState != FormWindowState.Normal)
+            {
+                WindowState = FormWindowState.Normal;
+            }
+            ClientSize = new Size(Math.Max(360, width), Math.Max(540, height));
+            PerformLayout();
+        }
+
+        internal async Task DispatchSpaKeyAsync(string key, bool ctrl)
+        {
+            if (IsDisposed || !_isCoreReady || _webView?.CoreWebView2 == null) return;
+            string escaped = key.Replace("\\", "\\\\").Replace("'", "\\'");
+            string ctrlLit = ctrl ? "true" : "false";
+            string script = $"window.dispatchEvent(new KeyboardEvent('keydown', {{ key: '{escaped}', ctrlKey: {ctrlLit}, bubbles: true }}));";
+            try
+            {
+                await _webView.CoreWebView2.ExecuteScriptAsync(script).ConfigureAwait(true);
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException or InvalidOperationException or COMException)
+            {
+                Debug.WriteLine($"[DisposableWebViewForm] Automation script dispatch skipped: {ex.Message}");
+            }
+        }
+
+        private void AttachWebViewKeyHook()
+        {
+            if (_webView is { IsDisposed: false, IsHandleCreated: true } && _webViewKeyHook is null)
+            {
+                _webViewKeyHook = new WebViewAutomationKeySubClass(this, _webView.Handle);
+            }
+        }
+
+        private void DetachWebViewKeyHook()
+        {
+            if (_webViewKeyHook is not null)
+            {
+                _webViewKeyHook.ReleaseHandle();
+                _webViewKeyHook = null;
+            }
+        }
+
+        private sealed class WebViewAutomationKeySubClass : NativeWindow
+        {
+            private readonly DisposableWebViewForm _owner;
+
+            public WebViewAutomationKeySubClass(DisposableWebViewForm owner, IntPtr handle)
+            {
+                _owner = owner;
+                AssignHandle(handle);
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == 0x0100 && DesktopAutomationBridge.HandleAutomationKeyDown(_owner, m.WParam.ToInt32()))
+                {
+                    return;
+                }
+                base.WndProc(ref m);
+            }
+        }
+#endif
+
+        private static bool ShouldSuppressExternalLaunch()
+        {
+            if (SandboxEnvironmentSeam.ResolveCurrent().IsSandboxActive) return true;
+            string? suppress = Environment.GetEnvironmentVariable("FOUNDATION_SUPPRESS_MODALS");
+            return !string.IsNullOrWhiteSpace(suppress) &&
+                   (suppress.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                    suppress.Equals("true", StringComparison.OrdinalIgnoreCase));
         }
 
         private static void TryEnableImmersiveDarkTitleBar(IntPtr handle)

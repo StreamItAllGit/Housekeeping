@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Net;
 using System.Text;
 using Housekeeping.Services;
 
@@ -11,17 +12,34 @@ namespace Housekeeping.Server.Hosting
         public bool ShowVersion { get; set; }
         public bool RunStatus { get; set; }
         public bool RunRepairConfig { get; set; }
+        public bool RunDoctor { get; set; }
         public bool StartMinimized { get; set; }
         public bool IsWatchdog { get; set; }
         public bool ManagedByMother { get; set; }
         public bool DryRun { get; set; }
         public bool? BindLanOverride { get; set; }
+        public string? BindHost { get; set; }
+        public string? SuiteId { get; set; }
         public int? PortOverride { get; set; }
+        public int? AutomationPort { get; set; }
+        public string? AutomationToken { get; set; }
         public string? CustomDataDirectory { get; set; }
         public string? CustomConfigFilePath { get; set; }
         public string? CustomLogsDirectory { get; set; }
         public string[] RemainingArgs { get; set; } = Array.Empty<string>();
         public string? ParseError { get; set; }
+
+        internal bool AutomationFlagSeen { get; set; }
+
+        public bool IsAutomationRequested =>
+            AutomationFlagSeen ||
+            AutomationPort.HasValue ||
+            !string.IsNullOrWhiteSpace(AutomationToken);
+
+        public string? EffectiveBindHost => ManagedByMother ? "127.0.0.1" : BindHost;
+
+        public bool? EffectiveBindLanOverride =>
+            ManagedByMother ? false : HousekeepingCliParser.ResolveEffectiveBindLanOverride(EffectiveBindHost, BindLanOverride);
 
         public bool IsIsolatedInvocation =>
             DryRun ||
@@ -34,6 +52,53 @@ namespace Housekeeping.Server.Hosting
 
     public static class HousekeepingCliParser
     {
+        public static bool IsAutomationRequested(string[]? args)
+        {
+            if (args is null || args.Length == 0)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < args.Length; i++)
+            {
+                string a = (args[i] ?? string.Empty).Trim();
+                if (a.Equals("--automation-port", StringComparison.OrdinalIgnoreCase) ||
+                    a.StartsWith("--automation-port=", StringComparison.OrdinalIgnoreCase) ||
+                    a.Equals("--automation-token", StringComparison.OrdinalIgnoreCase) ||
+                    a.StartsWith("--automation-token=", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public static bool? ResolveEffectiveBindLanOverride(string? bindHost, bool? explicitBindLan)
+        {
+            if (!string.IsNullOrWhiteSpace(bindHost))
+            {
+                string h = bindHost.Trim();
+                if (h.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("::1", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("[::1]", StringComparison.OrdinalIgnoreCase) ||
+                    (IPAddress.TryParse(h, out var ip) && IPAddress.IsLoopback(ip)))
+                {
+                    return false;
+                }
+
+                if (h.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("::", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("[::]", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("*", StringComparison.OrdinalIgnoreCase) ||
+                    h.Equals("any", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return explicitBindLan;
+        }
+
         public static HousekeepingParsedCli Parse(string[]? args)
         {
             var result = new HousekeepingParsedCli();
@@ -63,6 +128,10 @@ namespace Housekeeping.Server.Hosting
                 {
                     result.RunRepairConfig = true;
                 }
+                else if (string.Equals(a, "--doctor", StringComparison.OrdinalIgnoreCase))
+                {
+                    result.RunDoctor = true;
+                }
                 else if (string.Equals(a, "--minimized", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(a, "--silent", StringComparison.OrdinalIgnoreCase) ||
                          string.Equals(a, "--tray-only", StringComparison.OrdinalIgnoreCase))
@@ -74,7 +143,8 @@ namespace Housekeeping.Server.Hosting
                     result.IsWatchdog = true;
                     result.StartMinimized = true;
                 }
-                else if (string.Equals(a, "--managed-by-mother", StringComparison.OrdinalIgnoreCase))
+                else if (string.Equals(a, "--managed-by-mother", StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(a, "--managed-by-suite", StringComparison.OrdinalIgnoreCase))
                 {
                     result.ManagedByMother = true;
                     result.StartMinimized = true;
@@ -86,6 +156,50 @@ namespace Housekeeping.Server.Hosting
                 else if (string.Equals(a, "--localhost-only", StringComparison.OrdinalIgnoreCase))
                 {
                     result.BindLanOverride = false;
+                }
+                else if (TryReadOptionValue(args, ref i, "--bind", out string? bindVal, out string? bindErr))
+                {
+                    if (bindErr != null)
+                    {
+                        result.ParseError = bindErr;
+                        return result;
+                    }
+                    result.BindHost = bindVal!.Trim();
+                    result.BindLanOverride = ResolveEffectiveBindLanOverride(result.BindHost, result.BindLanOverride);
+                }
+                else if (TryReadOptionValue(args, ref i, "--suite-id", out string? suiteVal, out string? suiteErr))
+                {
+                    if (suiteErr != null)
+                    {
+                        result.ParseError = suiteErr;
+                        return result;
+                    }
+                    result.SuiteId = suiteVal!.Trim();
+                }
+                else if (TryReadOptionValue(args, ref i, "--automation-port", out string? autoPortVal, out string? autoPortErr))
+                {
+                    result.AutomationFlagSeen = true;
+                    if (autoPortErr != null)
+                    {
+                        result.ParseError = autoPortErr;
+                        return result;
+                    }
+                    if (!int.TryParse(autoPortVal, out int parsedAutoPort) || parsedAutoPort < 0 || parsedAutoPort > 65535)
+                    {
+                        result.ParseError = $"Invalid --automation-port value '{autoPortVal}'. Port must be an integer between 0 and 65535.";
+                        return result;
+                    }
+                    result.AutomationPort = parsedAutoPort;
+                }
+                else if (TryReadOptionValue(args, ref i, "--automation-token", out string? autoTokVal, out string? autoTokErr))
+                {
+                    result.AutomationFlagSeen = true;
+                    if (autoTokErr != null)
+                    {
+                        result.ParseError = autoTokErr;
+                        return result;
+                    }
+                    result.AutomationToken = autoTokVal!.Trim();
                 }
                 else if (TryReadOptionValue(args, ref i, "--port", out string? portVal, out string? portErr))
                 {
@@ -149,6 +263,11 @@ namespace Housekeeping.Server.Hosting
                 result.CustomLogsDirectory = FirstNonEmptyEnv("HOUSEKEEPING_LOG_DIR", "LOG_DIR");
             }
 
+            if (string.IsNullOrWhiteSpace(result.SuiteId))
+            {
+                result.SuiteId = FirstNonEmptyEnv("HOUSEKEEPING_SUITE_ID", "SUITE_ID");
+            }
+
             if (!result.PortOverride.HasValue)
             {
                 string? envPortText = FirstNonEmptyEnv("HOUSEKEEPING_PORT", "PORT");
@@ -166,6 +285,7 @@ namespace Housekeeping.Server.Hosting
             if (!result.ManagedByMother && IsTruthyEnv("HOUSEKEEPING_MANAGED_BY_MOTHER", "MOTHER_MANAGED"))
             {
                 result.ManagedByMother = true;
+                result.StartMinimized = true;
             }
 
             result.RemainingArgs = remaining.ToArray();
@@ -190,15 +310,19 @@ namespace Housekeeping.Server.Hosting
             sb.AppendLine();
             sb.AppendLine("Hosting & Execution Options:");
             sb.AppendLine("  --port <1-65535>       Override Kestrel HTTP listening port (Env: HOUSEKEEPING_PORT, PORT)");
+            sb.AppendLine("  --bind <host>          Override Kestrel bind address (e.g. 127.0.0.1 or 0.0.0.0)");
             sb.AppendLine("  --localhost-only       Bind strictly to 127.0.0.1 loopback (disable LAN/Tailnet listener)");
             sb.AppendLine("  --status               Print one-shot JSON daemon & configuration status and exit");
             sb.AppendLine("  --repair-config        Validate, migrate, or quarantine/recover settings.json and exit");
+            sb.AppendLine("  --doctor               Run system diagnostics, containment, and tool readiness check (0=pass, 2=fail)");
             sb.AppendLine("  --dry-run              Force all pipeline and job dispatches into non-destructive dry-run mode");
             sb.AppendLine("                         (Env: HOUSEKEEPING_DRY_RUN=1)");
             sb.AppendLine("  --tray-only, --minimized, --silent");
             sb.AppendLine("                         Start in System Tray without opening a browser/WebView2 window on launch");
             sb.AppendLine("  --watchdog             Internal Task Scheduler watchdog invocation (implies --tray-only)");
-            sb.AppendLine("  --managed-by-mother    Managed child daemon mode under Mother v1.0 (suppresses standalone system tray icon)");
+            sb.AppendLine("  --managed-by-suite, --managed-by-mother");
+            sb.AppendLine("                         Managed child daemon mode under Suite Host (127.0.0.1 bind + suppress tray)");
+            sb.AppendLine("  --suite-id <id>        Suite host identifier (e.g. mother) for managed child execution");
             sb.AppendLine("  --version, -v          Print current application version and exit");
             sb.AppendLine("  --help, -h             Show this command-line reference and exit");
             return sb.ToString();

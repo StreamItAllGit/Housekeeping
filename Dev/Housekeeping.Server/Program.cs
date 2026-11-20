@@ -1,7 +1,18 @@
 using System;
 using System.IO;
+using Foundation.Core;
 using Housekeeping.Server.Hosting;
 using Housekeeping.Services;
+
+#if !(DEBUG || HOUSEKEEPING_TEST_AUTOMATION)
+if (HousekeepingCliParser.IsAutomationRequested(args))
+{
+    Console.Error.WriteLine(
+        "Fail-closed: --automation-port and --automation-token are disabled in Release builds. " +
+        "Build with Debug or -p:HousekeepingTestAutomation=true (ExitCode=2).");
+    return 2;
+}
+#endif
 
 var cli = HousekeepingCliParser.Parse(args);
 if (!string.IsNullOrWhiteSpace(cli.ParseError))
@@ -10,6 +21,14 @@ if (!string.IsNullOrWhiteSpace(cli.ParseError))
     Console.Error.WriteLine("Run with --help for usage information.");
     return 2;
 }
+
+#if !(DEBUG || HOUSEKEEPING_TEST_AUTOMATION)
+if (cli.IsAutomationRequested)
+{
+    Console.Error.WriteLine("Fail-closed: --automation-* options are disabled in Release builds (ExitCode=2).");
+    return 2;
+}
+#endif
 
 if (cli.ShowVersion)
 {
@@ -33,6 +52,11 @@ if (cli.RunRepairConfig)
     return HousekeepingCliRunner.RunRepairConfig(cli);
 }
 
+if (cli.RunDoctor)
+{
+    return HousekeepingCliRunner.RunDoctor(cli);
+}
+
 string baseTrimmed = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory)
     .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 string defaultLogsRoot = string.Equals(Path.GetFileName(baseTrimmed), "app", StringComparison.OrdinalIgnoreCase) &&
@@ -46,31 +70,67 @@ string initialLogsDir = !string.IsNullOrWhiteSpace(cli.CustomLogsDirectory)
         ? Path.Combine(cli.CustomDataDirectory, "logs")
         : Path.Combine(defaultLogsRoot, "logs"));
 
-CrashBundleService.RegisterGlobalHandlers(
-    () => initialLogsDir,
-    RemoteNodeDeploymentService.GetLocalAppVersion(),
-    cli.IsIsolatedInvocation,
-    archetype: "2-tray-companion");
-
-var options = new HousekeepingServerOptions
-{
-    PortOverride = cli.PortOverride,
-    BindLanOverride = cli.BindLanOverride,
-    CustomDataDirectory = cli.CustomDataDirectory,
-    CustomConfigFilePath = cli.CustomConfigFilePath,
-    CustomLogsDirectory = cli.CustomLogsDirectory,
-    IsolatedOverride = cli.IsIsolatedInvocation,
-    DryRun = cli.DryRun
-};
+string? effectiveBindHost = cli.ManagedByMother ? "127.0.0.1" : cli.BindHost;
+bool? effectiveBindLan = cli.ManagedByMother
+    ? false
+    : HousekeepingCliParser.ResolveEffectiveBindLanOverride(effectiveBindHost, cli.BindLanOverride);
 
 try
 {
+    SandboxResolution sandbox = SandboxEnvironmentSeam.ResolveCurrent();
+    if (sandbox.IsSandboxActive)
+    {
+        if (!string.IsNullOrWhiteSpace(cli.CustomDataDirectory))
+            SandboxEnvironmentSeam.AssertSandboxPathIfActive(cli.CustomDataDirectory, sandbox);
+        if (!string.IsNullOrWhiteSpace(cli.CustomConfigFilePath))
+            SandboxEnvironmentSeam.AssertSandboxPathIfActive(cli.CustomConfigFilePath, sandbox);
+        if (!string.IsNullOrWhiteSpace(cli.CustomLogsDirectory))
+            SandboxEnvironmentSeam.AssertSandboxPathIfActive(cli.CustomLogsDirectory, sandbox);
+    }
+
+    Housekeeping.Services.CrashBundleService.RegisterGlobalHandlers(
+        () => initialLogsDir,
+        RemoteNodeDeploymentService.GetLocalAppVersion(),
+        cli.IsIsolatedInvocation || sandbox.IsSandboxActive,
+        archetype: "2-tray-companion");
+
+    var options = new HousekeepingServerOptions
+    {
+        PortOverride = cli.PortOverride,
+        BindLanOverride = effectiveBindLan,
+        CustomDataDirectory = cli.CustomDataDirectory,
+        CustomConfigFilePath = cli.CustomConfigFilePath,
+        CustomLogsDirectory = cli.CustomLogsDirectory,
+        IsolatedOverride = cli.IsIsolatedInvocation,
+        DryRun = cli.DryRun
+    };
+    ApplyOptionalSuiteHostingOptions(options, cli.ManagedByMother, effectiveBindHost, cli.SuiteId);
+
     using var app = HousekeepingServerHost.BuildWebApplication(cli.RemainingArgs, options);
     await app.RunAsync();
     return 0;
 }
+catch (Exception ex) when (SandboxEnvironmentSeam.IsContainmentViolation(ex))
+{
+    Console.Error.WriteLine($"Sandbox containment violation (ExitCode={SandboxEnvironmentSeam.ContainmentExitCode}): {ex.Message}");
+    return SandboxEnvironmentSeam.ContainmentExitCode;
+}
 catch (Exception ex)
 {
-    CrashBundleService.WriteCrashBundle(ex, logsDirOverride: initialLogsDir);
+    Housekeeping.Services.CrashBundleService.WriteCrashBundle(ex, logsDirOverride: initialLogsDir);
     throw;
+}
+
+static void ApplyOptionalSuiteHostingOptions(
+    HousekeepingServerOptions options,
+    bool managedByMother,
+    string? bindHost,
+    string? suiteId)
+{
+    Type t = typeof(HousekeepingServerOptions);
+    t.GetProperty("ManagedByMother")?.SetValue(options, managedByMother);
+    if (!string.IsNullOrWhiteSpace(bindHost))
+        t.GetProperty("BindHostOverride")?.SetValue(options, bindHost);
+    if (!string.IsNullOrWhiteSpace(suiteId))
+        t.GetProperty("SuiteId")?.SetValue(options, suiteId);
 }
