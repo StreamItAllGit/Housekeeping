@@ -51,7 +51,7 @@ $env:APP_ISOLATED_TEST = "1"
 dotnet test "D:\Projects\Personal\Housekeeping\Dev\Housekeeping.slnx" -c Release -p:TreatWarningsAsErrors=true
 Remove-Item Env:APP_ISOLATED_TEST
 powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Projects\Personal\Housekeeping\Dev\scripts\build_installer.ps1" -Version "0.1.12-hf.1"
-& "D:\Projects\Personal\Housekeeping\Installers\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe" --verify
+& "D:\Projects\Personal\Housekeeping\Releases\Latest\Housekeeping-Setup-v0.1.12-hf.1-win-x64.exe" --verify
 ```
 
 | CLI Flag / Env Var | Default | Purpose |
@@ -74,7 +74,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "D:\Projects\Personal\Housek
 
 ## 3. Architecture At a Glance
 
-- **Application Archetype:** Hybrid System Tray Daemon + Kestrel Web/API Server + Disposable WebView2 Desktop Host + Mobile PWA + Mother Companion Daemon ([Standard 08](file:///D:/Projects/Personal/_DevBible/08_APPLICATION_ARCHETYPES_AND_LIFECYCLE.md))
+- **Application Archetype:** Hybrid System Tray Daemon + Kestrel Web/API Server + Disposable WebView2 Desktop Host + Mobile PWA + Mother Companion Daemon ([Standard 08](file:///D:/Projects/Personal/_DevBible/08_APPLICATION_ARCHETYPES.md))
 - **Core Entry Points:** [`Housekeeping.Launcher\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Launcher/Program.cs), [`Housekeeping.DesktopHost\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.DesktopHost/Program.cs), [`Housekeeping.Server\Program.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Program.cs), [`HousekeepingApiEndpoints.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Server/Endpoints/HousekeepingApiEndpoints.cs), [`PipelineOrchestratorService.cs`](file:///D:/Projects/Personal/Housekeeping/Dev/Housekeeping.Core/Services/PipelineOrchestratorService.cs)
 - **Persistence & State:** Per-caller `{pid}.{guid}.tmp` atomic copy-on-write JSON (`settings.json`, `history.json`, `compliance_reports.json`, `pending_swaps.json`, `interrupted_run_checkpoint.json`) strictly contained in `data\`, 20-snapshot config rollback history in `backups\config_snapshots\`, post-injection `.archive_hashes.json`, `<SharedRoot>\.coexistence.json` (`v2`), and 9-column `CRC32`+`SHA-1` `collection_manifest.csv` ledgers.
 - **Port & IPC Allocation:** HTTP/SignalR on `:5178`; Mother disk arbitration on `/api/scheduler/status` and `/api/scheduler/defer`; Sister-App coexistence on `/api/v1/coexistence/*`.

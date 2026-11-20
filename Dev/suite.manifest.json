@@ -62,7 +62,7 @@
   "displayName": "Housekeeping",
   "sdkVersion": "0.3.0",
   "minSuiteVersion": "0.1.0",
-  "containerTier": "Tier A (5-Folder)",
+  "containerTier": "Tier A (4-Folder)",
   "ecosystemTier": "Tier2_SisterApp",
   "appArchetype": "SIS",
   "activeMilestone": "0.1.13",

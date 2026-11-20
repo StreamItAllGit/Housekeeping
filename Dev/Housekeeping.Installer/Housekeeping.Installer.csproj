@@ -12,11 +12,8 @@
     <Product>Housekeeping</Product>
     <Company>StreamItAll</Company>
     <Description>Housekeeping Self-Contained Windows Setup and Uninstaller</Description>
-    <Version Condition="'$(InstallerVersion)' == ''">0.1.12-hf.1</Version>
     <Version Condition="'$(InstallerVersion)' != ''">$(InstallerVersion)</Version>
     <InformationalVersion>$(Version)</InformationalVersion>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>0.1.12.1</FileVersion>
     <ApplicationIcon Condition="'$(InstallerIconPath)' != '' and Exists('$(InstallerIconPath)')">$(InstallerIconPath)</ApplicationIcon>
     <Deterministic>true</Deterministic>
     <PathMap>$(MSBuildThisFileDirectory)=/_/,$(USERPROFILE)=/user/</PathMap>

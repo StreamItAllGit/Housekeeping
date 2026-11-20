@@ -12,5 +12,5 @@
 - **Plans & Reports:** [Dev\docs\plans\](file:///D:/Projects/Personal/Housekeeping/Dev/docs/plans/) | [Dev\docs\reports\](file:///D:/Projects/Personal/Housekeeping/Dev/docs/reports/)
 
 ## 3. Governance & Notion ("The Me Hub")
-- **Dev Bible (`00`–`19`):** [`00_CORE_INVARIANTS_AND_GLOSSARY.md`](file:///D:/Projects/Personal/_DevBible/00_CORE_INVARIANTS_AND_GLOSSARY.md) | [`_DevBible\README.md`](file:///D:/Projects/Personal/_DevBible/README.md)
+- **Dev Bible:** [`00_GLOSSARY.md`](file:///D:/Projects/Personal/_DevBible/00_GLOSSARY.md) | [`_DevBible\README.md`](file:///D:/Projects/Personal/_DevBible/README.md)
 - **Notion (`🛠️ Projects`):** `REDACTED_NOTION_PAGE_ID` (`collection://REDACTED_NOTION_COLLECTION_ID`)

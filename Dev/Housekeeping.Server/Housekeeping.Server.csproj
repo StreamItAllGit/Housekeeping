@@ -11,6 +11,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Housekeeping.Core\Housekeeping.Core.csproj" />
+    <Reference Include="Foundation.Core">
+      <HintPath>..\lib\Foundation.Core.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>

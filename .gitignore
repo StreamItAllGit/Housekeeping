@@ -1,11 +1,13 @@
 # ==============================================================================
-# 1. 5-Folder Outer Container Exclusions (Local / Packaged / Ephemeral)
+# 1. 4-Folder Outer Container Exclusions (Local / Packaged / Ephemeral)
 # ==============================================================================
 /Archive/
 /Builds/
-/Installers/
 /Releases/
 Dev/docs/*/
+Dev/lib/
+Dev/Housekeeping.Core/MediaInfo.dll
+Dev/Housekeeping.Server/wwwroot/
 
 # ==============================================================================
 # 2. Toolchains, Virtual Environments & Package Caches

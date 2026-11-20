@@ -20,6 +20,18 @@
     <ProjectReference Include="..\Housekeeping.Core\Housekeeping.Core.csproj" />
     <ProjectReference Include="..\Housekeeping.Server\Housekeeping.Server.csproj" />
     <ProjectReference Include="..\Housekeeping.Installer\Housekeeping.Installer.csproj" />
+    <Reference Include="Foundation.Core">
+      <HintPath>..\lib\Foundation.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Foundation.Installer">
+      <HintPath>..\lib\Foundation.Installer.dll</HintPath>
+    </Reference>
+    <Reference Include="Foundation.UI">
+      <HintPath>..\lib\Foundation.UI.dll</HintPath>
+    </Reference>
+    <Reference Include="Foundation.Automation">
+      <HintPath>..\lib\Foundation.Automation.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
 </Project>

@@ -26,6 +26,18 @@
   <ItemGroup>
     <ProjectReference Include="..\Housekeeping.Core\Housekeeping.Core.csproj" />
     <ProjectReference Include="..\Housekeeping.Server\Housekeeping.Server.csproj" />
+    <Reference Include="Foundation.Core">
+      <HintPath>..\lib\Foundation.Core.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Configuration)' == 'Debug' or '$(HousekeepingTestAutomation)' == 'true'">
+    <Reference Include="Foundation.UI">
+      <HintPath>..\lib\Foundation.UI.dll</HintPath>
+    </Reference>
+    <Reference Include="Foundation.Automation">
+      <HintPath>..\lib\Foundation.Automation.dll</HintPath>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
