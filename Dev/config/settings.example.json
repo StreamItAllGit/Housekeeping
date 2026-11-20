@@ -1,0 +1,230 @@
+{
+  "ConfigVersion": 4,
+  "DefaultUseBuiltInTerminal": true,
+  "EnableNetworkDropSafety": true,
+  "NetworkRetryIntervalSeconds": 15,
+  "NetworkMaxRetries": 240,
+  "EnableAtomicPartialWrites": true,
+  "CleanupPartialsOnStartup": true,
+  "EnableDistributedNetworkLocking": true,
+  "DistributedLockTimeoutMinutes": 90,
+  "MinimizeToTrayOnClose": true,
+  "StartMinimizedToTray": false,
+  "StartWithWindows": false,
+  "EnableProcessGuard": true,
+  "GuardedProcessNames": [
+    "retroarch",
+    "rpcs3",
+    "pcsx2",
+    "duckstation",
+    "Dolphin",
+    "obs64"
+  ],
+  "EnableToastNotifications": true,
+  "NotifyOnNetworkDrop": true,
+  "EnableDiscordWebhook": false,
+  "DiscordWebhookUrl": "",
+  "DiscordNotifyQueueStart": true,
+  "DiscordNotifyQueueFinish": true,
+  "DiscordNotifyJobStart": false,
+  "DiscordNotifyJobFinish": false,
+  "DiscordNotifyTaskStart": false,
+  "DiscordNotifyErrors": true,
+  "DiscordCustomMachineName": "",
+  "TerminalMaxLines": 400,
+  "EnableWatchdog": false,
+  "WatchdogIntervalMinutes": 15,
+  "AutoRestartInterruptedRunsOnStartup": false,
+  "JobBuilderSortMode": "NameAsc",
+  "JobBuilderFilterModule": "All",
+  "JobBuilderViewMode": "Compact",
+  "TerminalVerbosity": "Everything",
+  "FooterVerbosity": "ProgressAndStatus",
+  "PostRunPowerAction": "StayAwake",
+  "AutoAlignWithSisterApps": false,
+  "UiLayout": {
+    "TerminalHeightPx": 260,
+    "TerminalSizePreset": "medium",
+    "TerminalOpen": false,
+    "TerminalWordWrap": false,
+    "SidebarCollapsed": false
+  },
+  "ToolPaths": {
+    "HandBrakeCliPath": "",
+    "SevenZipPath": "",
+    "RclonePath": "",
+    "HumbleDownloaderPath": ""
+  },
+  "WebServer": {
+    "Port": 5178,
+    "BindLanAndTailnet": false,
+    "AdminPasswordHash": "",
+    "AdminPasswordSalt": "",
+    "NodeApiToken": "",
+    "TrustTailscaleServeHeaders": true,
+    "RestrictRawShellToLocalhost": true,
+    "DefaultDesktopLaunchMode": "StandaloneWindow",
+    "ThemePreference": "Dark",
+    "UiDensity": "Compact"
+  },
+  "GreenroomIntegration": {
+    "Enabled": true,
+    "CompanionBaseUrl": "http://127.0.0.1:8420",
+    "CompanionPort": 8420,
+    "CompanionBearerToken": "",
+    "GreenroomRootPath": "",
+    "AutoSyncAfterRomManifestChanges": true,
+    "AutoSyncAfterCollectionManifestChanges": true
+  },
+  "RemoteNodes": [],
+  "ActiveQueueId": "default-queue",
+  "NamedQueues": [
+    {
+      "Id": "default-queue",
+      "Name": "Default Queue",
+      "Description": "Primary unattended hygiene queue",
+      "EnableSchedule": false,
+      "ScheduleMode": "DailyTime",
+      "ScheduleDailyTime": "03:00",
+      "ScheduleIntervalMinutes": 60,
+      "ScheduleSpecificTimesCsv": "03:00, 12:00, 18:00",
+      "ScheduleDays": [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+      ],
+      "Jobs": []
+    }
+  ],
+  "DefinedJobs": [],
+  "ProxyGenerator": {
+    "Enabled": false,
+    "HandBrakeProfileId": "Proxy_360p",
+    "ProxySuffixTag": "360p_proxy",
+    "Extensions": [
+      ".mp4",
+      ".mkv",
+      ".mov"
+    ],
+    "Folders": [
+      {
+        "Enabled": false,
+        "Path": "<MediaRoot>\\Captures"
+      }
+    ]
+  },
+  "ArchiveCompressor": {
+    "Enabled": false,
+    "HandBrakeProfileId": "Archive_LQ",
+    "OutputExtension": ".mkv",
+    "SkipFilesContainingTag": "_proxy)",
+    "InputExtensions": [
+      ".mp4",
+      ".mkv",
+      ".mov"
+    ],
+    "Mappings": [
+      {
+        "Enabled": false,
+        "Name": "Completed Captures",
+        "SourcePath": "<MediaRoot>\\Captures\\Completed",
+        "ArchiveOutputPath": "<MediaRoot>\\Archives\\Captures"
+      }
+    ]
+  },
+  "MediaTranscoder": {
+    "Enabled": false,
+    "DetectionMode": "FilenameTagMatching",
+    "MasterFileTag": "(Original)",
+    "RemoteModeSkipMediaInfo": false,
+    "ReEncodeNonHevcOutputs": true,
+    "DriveSubfolderRelativePath": "Media",
+    "DrivesToScan": [],
+    "CustomFoldersToScan": [
+      {
+        "Enabled": false,
+        "Path": "<MediaRoot>\\Video"
+      }
+    ],
+    "Extensions": [
+      "mkv",
+      "mp4",
+      "avi"
+    ]
+  },
+  "RomLauncherGenerator": {
+    "Enabled": false,
+    "AutoGenerateM3uForMultiDisc": true,
+    "AutoCompressUnarchivedRomsWith7z": false,
+    "DeleteUncompressedOriginalsAfter7z": false,
+    "UseFast7zListInspection": true,
+    "ExtractArchiveOnLaunch": true,
+    "CreateStartMenuShortcuts": false,
+    "CreateLocalLauncherNextToArchive": false,
+    "RefreshExistingLaunchers": false,
+    "LaunchersOutputRootPath": "<MediaRoot>\\Launchers",
+    "DatFilesDirectory": "./dats/",
+    "AutoDownloadMissingDats": true,
+    "Collections": []
+  },
+  "CloudSync": {
+    "Enabled": false,
+    "Jobs": [
+      {
+        "Enabled": false,
+        "JobName": "Example Save Sync",
+        "SyncMode": "bisync",
+        "LocalPath": "<MediaRoot>\\Saves",
+        "RemoteTarget": "remote:Backups/Saves",
+        "Flags": "--create-empty-src-dirs --resilient --verbose"
+      }
+    ]
+  },
+  "HumbleSync": {
+    "Enabled": false,
+    "SessionCookie": "",
+    "LibraryPath": "<MediaRoot>\\HumbleLibrary",
+    "AdditionalArgs": "--progress"
+  },
+  "CustomScripts": {
+    "Enabled": false,
+    "Tasks": []
+  },
+  "CollectionManifest": {
+    "Enabled": false,
+    "UnifiedMasterManifest": true,
+    "UnifiedManifestName": "Master_Collection_Manifest",
+    "UnifiedManifestOutputFolder": "<MediaRoot>\\Manifests",
+    "EnableBitRotDetection": true,
+    "CreateMissingHashFiles": false,
+    "EnableBitRotAutoHeal": false,
+    "CheckInnerArchiveAndContainer": true,
+    "HashFilePlacement": "SidecarBeside",
+    "HashAlgorithm": "SHA-1",
+    "SkipShadowLibraryManagedRoots": true,
+    "SyncPostInjectionContainerHashJson": true,
+    "CsvDelimiter": ",",
+    "ExportCsv": true,
+    "ExportJson": true,
+    "ExportHtmlReport": true,
+    "SecondaryMirrorFolder": "",
+    "AutoSyncGreenroomOnManifestChange": true,
+    "TargetFolders": [
+      {
+        "Enabled": false,
+        "LocationId": "Local-Pool",
+        "Label": "Sample Media Sets",
+        "FolderPath": "<MediaRoot>\\Sets",
+        "IncludeSubdirectories": true,
+        "MaxSubdirectoryDepth": 0,
+        "SystemSelection": "Auto-Detect",
+        "StructureMode": "Auto"
+      }
+    ],
+    "FieldParseRules": []
+  }
+}

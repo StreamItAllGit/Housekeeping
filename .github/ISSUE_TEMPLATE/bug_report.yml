@@ -1,0 +1,54 @@
+name: Bug Report
+description: Report a bug or regression in Housekeeping (Core modules, Web UI/PWA, Desktop Host, CLI, or Windows Installer)
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component / Module
+      options:
+        - Pipeline Orchestrator & Queues
+        - Module 1 — Proxy Gen
+        - Module 2 — Video Archiver
+        - Module 3 — Media Transcoder
+        - Module 4 — Game Launchers
+        - Module 5 — Cloud Sync (rclone)
+        - Module 6 — Humble Library
+        - Module 7 — Custom Tasks
+        - Module 8 — Collection Manifest & Bit-Rot Auditor
+        - Web UI / PWA & Subpath Proxy
+        - Desktop Host / System Tray / WebView2
+        - Server / REST API / Authentication
+        - CLI (--doctor / --status / --repair-config)
+        - Installer & Release Packaging
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Housekeeping Version
+      description: Release version or Git commit SHA where you observed the issue.
+      placeholder: "e.g., v0.2.0 (Beta)"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: Describe the Bug
+      description: Clear explanation of expected vs. actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal steps, CLI flags, or configuration that trigger the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Environment & Error Output
+      description: Windows version, external tool versions (HandBrakeCLI/7z/rclone), `--doctor` output, or redacted log excerpts (strip personal paths, tokens, cookies, and webhooks).
+      render: text
