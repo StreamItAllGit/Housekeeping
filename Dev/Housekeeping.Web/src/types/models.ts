@@ -730,6 +730,7 @@ export type {
   RegexPlaygroundResultDto,
   RunHistoryEntry,
   TailscalePwaStatusDto,
+  TailscaleQrDto,
   TerminalSizePreset,
   UiLayoutConfig,
 } from './coexistenceModels';

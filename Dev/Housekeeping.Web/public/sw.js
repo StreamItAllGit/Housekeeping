@@ -1,14 +1,14 @@
-const CACHE_NAME = 'housekeeping-shell-v0.1.12-hf.1';
+const CACHE_NAME = 'housekeeping-shell-v0.2.0';
 const PRECACHE_URLS = [
-  '/',
-  '/manifest.webmanifest',
-  '/favicon.ico',
-  '/app_icon.png',
-  '/apple-touch-icon.png',
-  '/icon-192.png',
-  '/icon-512.png',
-  '/icon-maskable-192.png',
-  '/icon-maskable-512.png',
+  './',
+  './manifest.webmanifest',
+  './favicon.ico',
+  './app_icon.png',
+  './apple-touch-icon.png',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-maskable-192.png',
+  './icon-maskable-512.png',
 ];
 
 const OFFLINE_FALLBACK_HTML = `<!doctype html>
@@ -55,7 +55,7 @@ const OFFLINE_FALLBACK_HTML = `<!doctype html>
 </head>
 <body>
   <div class="card">
-    <img src="/icon-192.png" alt="Housekeeping" />
+    <img src="./icon-192.png" alt="Housekeeping" />
     <h1>Housekeeping Host Unreachable</h1>
     <p>Verify that your Housekeeping PC is powered on and Tailscale or LAN connectivity is active.</p>
     <button type="button" onclick="location.reload()">Retry Connection</button>
@@ -106,8 +106,8 @@ self.addEventListener('fetch', (event) => {
 
   // Never intercept or cache live API endpoints or SignalR real-time hubs
   if (
-    url.pathname.startsWith('/api/') ||
-    url.pathname.startsWith('/hubs/')
+    url.pathname.includes('/api/') ||
+    url.pathname.includes('/hubs/')
   ) {
     return;
   }
@@ -127,7 +127,8 @@ self.addEventListener('fetch', (event) => {
           return cached;
         }
         if (request.mode === 'navigate') {
-          const rootShell = await caches.match('/');
+          const scopeUrl = self.registration?.scope || './';
+          const rootShell = (await caches.match(scopeUrl)) || (await caches.match('./'));
           if (rootShell) {
             return rootShell;
           }

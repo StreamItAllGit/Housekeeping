@@ -56,7 +56,7 @@ export const SidebarNavRail: React.FC<SidebarNavRailProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setActiveTab]);
 
-  const rawVersion = authStatus?.version || '0.1.12-hf.1';
+  const rawVersion = authStatus?.version || '0.2.0';
   const versionStr = rawVersion.startsWith('v') ? rawVersion : `v${rawVersion}`;
 
   return (
@@ -65,7 +65,7 @@ export const SidebarNavRail: React.FC<SidebarNavRailProps> = ({
       aria-label="Primary sidebar navigation"
     >
       <div className="hk-sidebar-header">
-        <img src="/app_icon.png" alt="Housekeeping" className="hk-sidebar-logo" />
+        <img src="./app_icon.png" alt="Housekeeping" className="hk-sidebar-logo" />
         {!collapsed && (
           <div className="hk-sidebar-brand-text">
             <span className="hk-sidebar-title">Housekeeping</span>

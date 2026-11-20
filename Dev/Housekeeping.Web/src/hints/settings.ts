@@ -67,4 +67,22 @@ export const SETTINGS_HINTS = {
     `${col} reported by the runtime dependency resolver.\nOverrides can be configured under Tools & HandBrake Profiles.`,
   thDoctorDrive: (col: string) =>
     `${col} sampled from mounted local and SMB storage volumes.\nWarns automatically when free space drops below 12% or 25 GB.`,
+  pwaInstallApp:
+    'Installs Housekeeping as a standalone desktop or mobile Progressive Web App.\nRuns in an app window with offline shell recovery and scoped service worker caching.',
+  pwaSwitchHttps:
+    'Switches from insecure LAN HTTP to your trusted Tailscale Serve HTTPS origin.\nMobile Chrome and Safari require HTTPS to enable standalone PWA installation.',
+  pwaSetupHttps:
+    'Opens Web & Tailnet settings to configure Tailscale Serve HTTPS and QR pairing.\nRequired when installing the Housekeeping PWA on Android or iOS devices.',
+  tailscaleRefresh:
+    'Re-probes local Tailscale daemon status, MagicDNS hostname, and QR codes.\nUpdates direct HTTPS and Mother subpath pairing links immediately.',
+  tailscaleEnable:
+    'Configures tailscale serve --bg HTTPS proxying to your local Housekeeping port.\nEnables zero-warning mobile PWA installation with automatic Tailnet TLS certificates.',
+  tailscaleReset:
+    'Clears the local tailscale serve HTTPS proxy configuration.\nLocal HTTP and Mother loopback access remain active.',
+  tailscaleCopyDirectUrl:
+    'Copies the direct Housekeeping MagicDNS HTTPS URL for mobile or remote browsers.\nScan the matching QR code or paste this link on your Tailnet device.',
+  tailscaleCopyMotherUrl:
+    'Copies the Mother suite subpath URL (/app/housekeeping/) for unified gateway access.\nRoutes traffic through Mother Cold-Wake supervision and reverse proxy.',
+  tailscaleQrVariant:
+    'Switches the offline ISO/IEC 18004 SVG QR code between Mother subpath and Direct URL.\nScan with a Tailnet phone camera to launch or install the Housekeeping PWA.',
 } as const;

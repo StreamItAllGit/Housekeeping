@@ -1,6 +1,12 @@
+// @module: Housekeeping.DesktopHost.TrayDaemonApplicationContext
+// @purpose: Hosts the background WebApplication + optional WinForms System Tray icon (suppressed under Mother supervision) and WebView2 desktop window.
+// @depends-on: System, System.Diagnostics, System.Drawing, System.Linq, System.Threading, System.Threading.Tasks, System.Windows.Forms, Housekeeping.Services, Housekeeping.Server.Hosting, Microsoft.AspNetCore.Builder
+// @exports: TrayDaemonLaunchOptions, TrayDaemonApplicationContext
+
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -16,6 +22,8 @@ namespace Housekeeping.DesktopHost
         public bool StartMinimized { get; set; }
         public int? PortOverride { get; set; }
         public bool? BindLanOverride { get; set; }
+        public string? BindHostOverride { get; set; }
+        public string? SuiteId { get; set; }
         public string? CustomDataDirectory { get; set; }
         public string? CustomConfigFilePath { get; set; }
         public string? CustomLogsDirectory { get; set; }
@@ -29,23 +37,21 @@ namespace Housekeeping.DesktopHost
         private readonly StaNativeDialogBridge _dialogBridge;
         private readonly HousekeepingRuntimeContainer _runtime;
         private readonly WebApplication _webApp;
-        private readonly NotifyIcon _notifyIcon;
-        private readonly ContextMenuStrip _trayMenu;
+        private readonly NotifyIcon? _notifyIcon;
+        private readonly ContextMenuStrip? _trayMenu;
         private readonly Icon? _customIcon;
         private readonly int _activePort;
-        private readonly string? _customDataDirectory;
         private readonly bool _managedByMother;
 
-        private readonly ToolStripMenuItem _pauseResumeMenuItem;
-        private readonly ToolStripMenuItem _stopCurrentJobMenuItem;
-        private readonly ToolStripMenuItem _stopEntireQueueMenuItem;
+        private readonly ToolStripMenuItem? _pauseResumeMenuItem;
+        private readonly ToolStripMenuItem? _stopCurrentJobMenuItem;
+        private readonly ToolStripMenuItem? _stopEntireQueueMenuItem;
         private DisposableWebViewForm? _standaloneWindow;
         private bool _shuttingDown;
 
         public TrayDaemonApplicationContext(TrayDaemonLaunchOptions launchOptions)
         {
-            _customDataDirectory = launchOptions.CustomDataDirectory;
-            _managedByMother = launchOptions.ManagedByMother;
+            _managedByMother = ResolveManagedByMother(launchOptions);
             _dialogBridge = new StaNativeDialogBridge();
             _dialogBridge.RestoreUiRequested += OpenPreferredDesktopUi;
             _dialogBridge.OpenStandaloneWindowRequested += () => OpenStandaloneWindow();
@@ -66,7 +72,10 @@ namespace Housekeeping.DesktopHost
             var serverOptions = new HousekeepingServerOptions
             {
                 PortOverride = _activePort,
-                BindLanOverride = launchOptions.BindLanOverride,
+                BindLanOverride = _managedByMother ? false : launchOptions.BindLanOverride,
+                BindHostOverride = _managedByMother ? "127.0.0.1" : launchOptions.BindHostOverride,
+                ManagedByMother = _managedByMother,
+                SuiteId = launchOptions.SuiteId,
                 CustomDataDirectory = launchOptions.CustomDataDirectory,
                 CustomConfigFilePath = launchOptions.CustomConfigFilePath,
                 CustomLogsDirectory = launchOptions.CustomLogsDirectory,
@@ -99,38 +108,42 @@ namespace Housekeeping.DesktopHost
                 }
             });
 
-            bool bindAll = launchOptions.BindLanOverride ?? _runtime.ConfigService.Config.WebServer.BindLanAndTailnet;
-            _runtime.Orchestrator.Log("INFO", $"[DesktopHost] Housekeeping Engine Online — listening on {(bindAll ? "0.0.0.0" : "127.0.0.1")}:{_activePort}");
+            string bindDisplay = ResolveBindDisplay(launchOptions, _managedByMother, _runtime);
+            _runtime.Orchestrator.Log("INFO", $"[DesktopHost] Housekeeping Engine Online — listening on {bindDisplay}:{_activePort}");
 
             _customIcon = TrayMenuFactory.TryLoadAppIcon();
-            var menuControls = TrayMenuFactory.Create(
-                _activePort,
-                BaseLocalUrl,
-                _runtime,
-                OpenInBrowser,
-                OpenStandaloneWindow,
-                OpenPreferredDesktopUi,
-                ShowBalloon,
-                RequestEngineShutdown);
-
-            _trayMenu = menuControls.Menu;
-            _pauseResumeMenuItem = menuControls.PauseResumeMenuItem;
-            _stopCurrentJobMenuItem = menuControls.StopCurrentJobMenuItem;
-            _stopEntireQueueMenuItem = menuControls.StopEntireQueueMenuItem;
-
-            _notifyIcon = new NotifyIcon
+            if (!_managedByMother)
             {
-                Icon = _customIcon ?? SystemIcons.Application,
-                Text = TrayMenuFactory.TruncateNotifyText($"Housekeeping — Online (:{_activePort})"),
-                ContextMenuStrip = _trayMenu,
-                Visible = !_managedByMother
-            };
+                var menuControls = TrayMenuFactory.Create(
+                    _activePort,
+                    BaseLocalUrl,
+                    _runtime,
+                    OpenInBrowser,
+                    OpenStandaloneWindow,
+                    OpenPreferredDesktopUi,
+                    ShowBalloon,
+                    RequestEngineShutdown);
 
-            _notifyIcon.DoubleClick += (_, _) => OpenPreferredDesktopUi();
+                _trayMenu = menuControls.Menu;
+                _pauseResumeMenuItem = menuControls.PauseResumeMenuItem;
+                _stopCurrentJobMenuItem = menuControls.StopCurrentJobMenuItem;
+                _stopEntireQueueMenuItem = menuControls.StopEntireQueueMenuItem;
+
+                _notifyIcon = new NotifyIcon
+                {
+                    Icon = _customIcon ?? SystemIcons.Application,
+                    Text = TrayMenuFactory.TruncateNotifyText($"Housekeeping — Online (:{_activePort})"),
+                    ContextMenuStrip = _trayMenu,
+                    Visible = true
+                };
+
+                _notifyIcon.DoubleClick += (_, _) => OpenPreferredDesktopUi();
+            }
+
             _runtime.Orchestrator.OnTrayNotificationRequested += HandleTrayNotificationRequested;
             _runtime.Orchestrator.OnStateChanged += HandlePipelineStateChanged;
 
-            if (!launchOptions.StartMinimized)
+            if (!launchOptions.StartMinimized && !_managedByMother)
                 OpenPreferredDesktopUi();
         }
 
@@ -175,6 +188,33 @@ namespace Housekeeping.DesktopHost
             _standaloneWindow.Activate();
         }
 
+        private static bool ResolveManagedByMother(TrayDaemonLaunchOptions opts)
+        {
+            if (opts.ManagedByMother) return true;
+            if (opts.RawArgs.Any(a => a.Equals("--managed-by-mother", StringComparison.OrdinalIgnoreCase) ||
+                                      a.Equals("--managed-by-suite", StringComparison.OrdinalIgnoreCase)))
+                return true;
+
+            foreach (string key in new[] { "HOUSEKEEPING_MANAGED_BY_MOTHER", "MOTHER_MANAGED", "MANAGED_BY_SUITE", "MOTHER_SUPERVISED" })
+            {
+                string? val = Environment.GetEnvironmentVariable(key);
+                if (!string.IsNullOrWhiteSpace(val) &&
+                    (val.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                     val.Equals("true", StringComparison.OrdinalIgnoreCase) ||
+                     val.Equals("yes", StringComparison.OrdinalIgnoreCase)))
+                    return true;
+            }
+            return false;
+        }
+
+        private static string ResolveBindDisplay(TrayDaemonLaunchOptions opts, bool managedByMother, HousekeepingRuntimeContainer runtime)
+        {
+            if (managedByMother) return "127.0.0.1 (Mother-managed)";
+            if (!string.IsNullOrWhiteSpace(opts.BindHostOverride)) return opts.BindHostOverride.Trim();
+            bool bindAll = opts.BindLanOverride ?? runtime.ConfigService.Config.WebServer.BindLanAndTailnet;
+            return bindAll ? "0.0.0.0" : "127.0.0.1";
+        }
+
         private static void OpenInBrowser(string url)
         {
             try { Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true }); }
@@ -183,31 +223,33 @@ namespace Housekeeping.DesktopHost
 
         private void HandleTrayNotificationRequested(string title, string message, bool isWarning)
         {
-            if (_shuttingDown || !_dialogBridge.IsAvailable || _managedByMother) return;
+            if (_shuttingDown || !_dialogBridge.IsAvailable || _managedByMother || _notifyIcon == null) return;
             try { _dialogBridge.BeginInvoke(new Action(() => ShowBalloon(title, message, isWarning))); }
             catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Notification ignored: {ex.Message}"); }
         }
 
         private void HandlePipelineStateChanged(PipelineRuntimeStateDto state)
         {
-            if (_shuttingDown || !_dialogBridge.IsAvailable) return;
+            if (_shuttingDown || !_dialogBridge.IsAvailable || _managedByMother || _notifyIcon == null) return;
             try
             {
                 _dialogBridge.BeginInvoke(new Action(() =>
                 {
-                    if (_shuttingDown) return;
-                    _pauseResumeMenuItem.Enabled = state.IsRunning;
-                    _pauseResumeMenuItem.Text = state.IsPaused ? "▶ Resume Paused Queue" : "⏸ Pause Active Queue";
-                    _stopCurrentJobMenuItem.Enabled = state.IsRunning;
-                    _stopEntireQueueMenuItem.Enabled = state.IsRunning || state.PendingRuns.Count > 0;
-
-                    if (!_managedByMother)
+                    if (_shuttingDown || _notifyIcon == null) return;
+                    if (_pauseResumeMenuItem != null)
                     {
-                        string tooltip = state.IsRunning
-                            ? $"Housekeeping — {(state.IsPaused ? "Paused" : "Running")}: {state.ActiveJobName ?? "Queue"} ({state.ProgressPercent:0}%)"
-                            : $"Housekeeping — Online (:{_activePort})";
-                        _notifyIcon.Text = TrayMenuFactory.TruncateNotifyText(tooltip);
+                        _pauseResumeMenuItem.Enabled = state.IsRunning;
+                        _pauseResumeMenuItem.Text = state.IsPaused ? "▶ Resume Paused Queue" : "⏸ Pause Active Queue";
                     }
+                    if (_stopCurrentJobMenuItem != null)
+                        _stopCurrentJobMenuItem.Enabled = state.IsRunning;
+                    if (_stopEntireQueueMenuItem != null)
+                        _stopEntireQueueMenuItem.Enabled = state.IsRunning || state.PendingRuns.Count > 0;
+
+                    string tooltip = state.IsRunning
+                        ? $"Housekeeping — {(state.IsPaused ? "Paused" : "Running")}: {state.ActiveJobName ?? "Queue"} ({state.ProgressPercent:0}%)"
+                        : $"Housekeeping — Online (:{_activePort})";
+                    _notifyIcon.Text = TrayMenuFactory.TruncateNotifyText(tooltip);
                 }));
             }
             catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] State update ignored: {ex.Message}"); }
@@ -215,7 +257,7 @@ namespace Housekeeping.DesktopHost
 
         private void ShowBalloon(string title, string message, bool isWarning)
         {
-            if (_shuttingDown) return;
+            if (_shuttingDown || _notifyIcon == null) return;
             try
             {
                 _notifyIcon.ShowBalloonTip(
@@ -258,8 +300,11 @@ namespace Housekeeping.DesktopHost
                 _standaloneWindow = null;
             }
 
-            try { _notifyIcon.Visible = false; _notifyIcon.Dispose(); }
-            catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] NotifyIcon dispose ignored: {ex.Message}"); }
+            if (_notifyIcon != null)
+            {
+                try { _notifyIcon.Visible = false; _notifyIcon.Dispose(); }
+                catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] NotifyIcon dispose ignored: {ex.Message}"); }
+            }
 
             try
             {
@@ -273,7 +318,7 @@ namespace Housekeeping.DesktopHost
             catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Shutdown task ignored: {ex.Message}"); }
 
             try { _runtime.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Runtime dispose ignored: {ex.Message}"); }
-            try { _trayMenu.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Menu dispose ignored: {ex.Message}"); }
+            try { _trayMenu?.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Menu dispose ignored: {ex.Message}"); }
             try { _customIcon?.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] Icon dispose ignored: {ex.Message}"); }
             try { _dialogBridge.Close(); _dialogBridge.Dispose(); } catch (Exception ex) { Debug.WriteLine($"[TrayDaemonApplicationContext] DialogBridge dispose ignored: {ex.Message}"); }
 

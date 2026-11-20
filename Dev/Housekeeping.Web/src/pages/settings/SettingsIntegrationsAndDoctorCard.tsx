@@ -194,7 +194,7 @@ export const SettingsIntegrationsAndDoctorCard: React.FC<Props> = ({
         <div className="hk-grid-4" style={{ marginTop: 12 }}>
           <div className="hk-kpi-card">
             <span className="hk-kpi-label">APP VERSION</span>
-            <span className="hk-kpi-value ok">{authStatus?.version || '0.1.12-hf.1'}</span>
+            <span className="hk-kpi-value ok">{authStatus?.version || '0.2.0'}</span>
             <span className="hk-kpi-sub">Standard 03 / PATCH+1</span>
           </div>
           <div className="hk-kpi-card">
