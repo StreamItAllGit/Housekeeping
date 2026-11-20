@@ -309,11 +309,15 @@ namespace Housekeeping.Server.Hosting
                 Path.Combine(KnownFolderPaths.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "MediaInfo")
             }).ToArray();
 
+            ToolResolutionResult mediaInfoResult = Housekeeping.Interop.MediaInfoNativeResolver.Resolve(cfgSvc.DataDirectory, null);
+
             return new[]
             {
                 ToolResolver.ResolveTool("rclone", new[] { "rclone.exe" }, cfgSvc.Config.ToolPaths.RclonePath, cfgSvc.InstallRootDirectory, sharedExtras),
                 ToolResolver.ResolveTool("ffmpeg", new[] { "ffmpeg.exe" }, null, cfgSvc.InstallRootDirectory, sharedExtras),
-                ToolResolver.ResolveTool("mediainfo", new[] { "MediaInfo.dll" }, null, cfgSvc.InstallRootDirectory, mediaInfoExtras),
+                mediaInfoResult.IsAvailable
+                    ? mediaInfoResult
+                    : ToolResolver.ResolveTool("mediainfo", new[] { "MediaInfo.dll" }, null, cfgSvc.InstallRootDirectory, mediaInfoExtras),
                 ToolResolver.ResolveTool("7z", new[] { "7z.exe" }, cfgSvc.Config.ToolPaths.SevenZipPath, cfgSvc.InstallRootDirectory, sharedExtras),
                 ToolResolver.ResolveTool("handbrake", new[] { "HandBrakeCLI.exe", "handbrakecli.exe" }, cfgSvc.Config.ToolPaths.HandBrakeCliPath, cfgSvc.InstallRootDirectory, sharedExtras)
             };

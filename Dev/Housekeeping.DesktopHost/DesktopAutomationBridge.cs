@@ -145,9 +145,9 @@ namespace Housekeeping.DesktopHost
 
         public bool TryCaptureRgba(out int width, out int height, out byte[] rgbaBytes)
         {
-            RequestRefresh();
             DisposableWebViewForm? form;
             lock (InstanceLock) form = _activeForm;
+            bool needRefresh = false;
             if (form is { IsDisposed: false, Visible: true } && form.WebViewControl is { IsDisposed: false, Visible: true, CoreWebView2: not null })
             {
                 lock (_frameSync)
@@ -157,8 +157,10 @@ namespace Housekeeping.DesktopHost
                         width = _latestWidth; height = _latestHeight; rgbaBytes = (byte[])_latestRgba.Clone();
                         return true;
                     }
+                    needRefresh = true;
                 }
             }
+            if (needRefresh) RequestRefresh();
             width = 0; height = 0; rgbaBytes = Array.Empty<byte>();
             return false;
         }

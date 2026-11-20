@@ -102,9 +102,11 @@ try
         CustomConfigFilePath = cli.CustomConfigFilePath,
         CustomLogsDirectory = cli.CustomLogsDirectory,
         IsolatedOverride = cli.IsIsolatedInvocation,
-        DryRun = cli.DryRun
+        DryRun = cli.DryRun,
+        ManagedByMother = cli.ManagedByMother,
+        BindHostOverride = string.IsNullOrWhiteSpace(effectiveBindHost) ? null : effectiveBindHost,
+        SuiteId = string.IsNullOrWhiteSpace(cli.SuiteId) ? null : cli.SuiteId
     };
-    ApplyOptionalSuiteHostingOptions(options, cli.ManagedByMother, effectiveBindHost, cli.SuiteId);
 
     using var app = HousekeepingServerHost.BuildWebApplication(cli.RemainingArgs, options);
     await app.RunAsync();
@@ -119,18 +121,4 @@ catch (Exception ex)
 {
     Housekeeping.Services.CrashBundleService.WriteCrashBundle(ex, logsDirOverride: initialLogsDir);
     throw;
-}
-
-static void ApplyOptionalSuiteHostingOptions(
-    HousekeepingServerOptions options,
-    bool managedByMother,
-    string? bindHost,
-    string? suiteId)
-{
-    Type t = typeof(HousekeepingServerOptions);
-    t.GetProperty("ManagedByMother")?.SetValue(options, managedByMother);
-    if (!string.IsNullOrWhiteSpace(bindHost))
-        t.GetProperty("BindHostOverride")?.SetValue(options, bindHost);
-    if (!string.IsNullOrWhiteSpace(suiteId))
-        t.GetProperty("SuiteId")?.SetValue(options, suiteId);
 }

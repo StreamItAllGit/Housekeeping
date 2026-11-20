@@ -130,7 +130,7 @@ Powered by `Foundation.Installer.StandardInstallerHost` and `installer.manifest.
 | :--- | :--- | :--- |
 | **HTTP & SignalR Port** | `5178` (`127.0.0.1:5178`) | Enforced `127.0.0.1` loopback when `--managed-by-mother` / `--managed-by-suite` or `--localhost-only` is set; served behind `Mother` at `/app/housekeeping/`. |
 | **Tailscale Serve HTTPS** | `:443` (`:8478` manifest) | Managed via `TailscalePwaService` (`tailscale serve --bg --yes http://127.0.0.1:5178`) with offline SVG QR via `GET /api/v1/system/tailscale-qr`. |
-| **Single-Instance Mutex** | `Global\Mother_Housekeeping_Mutex` | Unified suite mutex; scopes to `Global\Housekeeping_3_Scoped_<12hex>` under isolated/test overrides (`APP_ISOLATED_TEST=1`, `--data-dir`, `--port`, etc.). |
+| **Single-Instance Mutex** | `Global\Mother_Housekeeping_Mutex` | Unified suite mutex; scopes to `Global\Mother_Housekeeping_Scoped_<12hex>` under isolated/test overrides (`APP_ISOLATED_TEST=1`, `--data-dir`, `--port`, etc.). |
 | **File & Directory `.hklock`** | `<Target>.hklock` & `<Dir>\.<appId>_<pid>.hklock` | Distributed lockfile + PID/StartTime directory sentinel evicting dead/recycled PIDs and deferring to active peer locks. |
 | **Coexistence & Archive Registries** | `.coexistence.json` (`v2`), `.archive_hashes.json` (`v1`) | Coordinates `Housekeeping`, `ShadowLibrary`, `Redroom`, `uStation`, `StreamEngine`, and `Greenroom`. |
 | **Single-Flight Fleet SMB Sync** | `<RemoteRoot>\app\` & `<RemoteRoot>\data\` | Per-node `SemaphoreSlim` gate (`RemoteNodeDeploymentService.PushLock.cs`) with `{pid}.{guid}.tmp` atomic staging and zero `AGENTS.md` remote sync. |

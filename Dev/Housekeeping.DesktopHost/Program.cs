@@ -179,9 +179,10 @@ namespace Housekeeping.DesktopHost
                     CustomLogsDirectory = cli.CustomLogsDirectory,
                     IsolatedOverride = cli.IsIsolatedInvocation,
                     DryRun = cli.DryRun,
-                    ManagedByMother = cli.ManagedByMother
+                    ManagedByMother = cli.ManagedByMother,
+                    BindHostOverride = string.IsNullOrWhiteSpace(effectiveBindHost) ? null : effectiveBindHost,
+                    SuiteId = string.IsNullOrWhiteSpace(cli.SuiteId) ? null : cli.SuiteId
                 };
-                ApplyOptionalSuiteLaunchOptions(launchOptions, effectiveBindHost, cli.SuiteId);
 
                 using var trayContext = new TrayDaemonApplicationContext(launchOptions);
 #if DEBUG || HOUSEKEEPING_TEST_AUTOMATION
@@ -240,18 +241,6 @@ namespace Housekeeping.DesktopHost
                     Debug.WriteLine($"[Program] ReleaseMutex skipped: {mutexEx.Message}");
                 }
             }
-        }
-
-        private static void ApplyOptionalSuiteLaunchOptions(
-            TrayDaemonLaunchOptions options,
-            string? bindHost,
-            string? suiteId)
-        {
-            Type t = typeof(TrayDaemonLaunchOptions);
-            if (!string.IsNullOrWhiteSpace(bindHost))
-                t.GetProperty("BindHostOverride")?.SetValue(options, bindHost);
-            if (!string.IsNullOrWhiteSpace(suiteId))
-                t.GetProperty("SuiteId")?.SetValue(options, suiteId);
         }
 
         private static void TryAttachParentConsole()

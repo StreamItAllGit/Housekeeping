@@ -104,9 +104,9 @@ function Convert-ToSanitizedReleaseMarkdown {
     $txt = [regex]::Replace($txt, "(?i)$dLead" + "Proj" + "ects$sep", '')
     $txt = [regex]::Replace($txt, "(?i)$dLead" + "Prog" + "rams$sep(?:Housekeeping[\\/]*)?", '%LOCALAPPDATA%\Programs\StreamItAll\Mother\Housekeeping\')
     $txt = [regex]::Replace($txt, "(?i)$cLead" + "Us" + "ers$sep[^\\/\s)]+[\\/]*", '%USERPROFILE%\')
-    $txt = [regex]::Replace($txt, '(?i)\bDev[\\/](docs|Housekeeping\.[A-Za-z]+|scripts)[\\/]?[^\s`)]*', 'app/')
+    $txt = [regex]::Replace($txt, '(?i)\bDev[\\/](docs|Housekeeping\.[A-Za-z]+|scripts)[\\/]?(?:[^\s`){]*\{[^}]+\}|[^\s`)]*)', 'app/')
     if ($Kind -eq "README" -and $txt -notmatch '(?m)^##\s+License\s+&\s+Legal') {
-        $txt = $txt.TrimEnd() + "`n`n---`n`n## License & Legal`n`nHousekeeping is licensed under the **Mozilla Public License Version 2.0 (`MPL-2.0`)**. See `app\LICENSE` in portable/installed builds for the complete license text.`n"
+        $txt = $txt.TrimEnd() + "`n`n---`n`n## License & Legal`n`nHousekeeping is licensed under the **Mozilla Public License Version 2.0 (``MPL-2.0``)**. See ``app\LICENSE`` in portable/installed builds for the complete license text.`n"
     } elseif ($Kind -eq "FEATURES") {
         $txt = (($txt -split "`n" | Where-Object { $_ -notmatch '(?i)\|\s*\*\*`?(In-Dev|Planned)' }) -join "`n").TrimEnd() + "`n"
     }

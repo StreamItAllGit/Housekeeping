@@ -271,5 +271,83 @@ namespace Housekeeping.Tests
                 TestCleanupHelper.TryDeleteDirectory(installDir);
             }
         }
+
+        [Fact]
+        public void SuiteManifestV2_ExistsAndIsValid_StrictCamelCaseAndStringCommands()
+        {
+            string? manifestPath = new[]
+            {
+                Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "suite.manifest.json")),
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "suite.manifest.json")
+            }.FirstOrDefault(File.Exists);
+
+            Assert.False(string.IsNullOrWhiteSpace(manifestPath), "Expected Dev\\suite.manifest.json to exist.");
+            using var doc = JsonDocument.Parse(File.ReadAllText(manifestPath!));
+            JsonElement root = doc.RootElement;
+
+            Assert.Equal(2, root.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal("housekeeping", root.GetProperty("appId").GetString());
+            Assert.Equal("0.2.0", root.GetProperty("version").GetString());
+            Assert.Equal("0.5.3", root.GetProperty("sdkVersion").GetString());
+            Assert.Equal("0.3.0", root.GetProperty("minSuiteVersion").GetString());
+            Assert.Equal(JsonValueKind.Array, root.GetProperty("workerArgs").ValueKind);
+
+            JsonElement commands = root.GetProperty("commands");
+            foreach (string key in new[] { "startDaemon", "stopDaemon", "statusCheck", "backupNow" })
+                Assert.Equal(JsonValueKind.String, commands.GetProperty(key).ValueKind);
+
+            Assert.Equal("/api/v1/health", root.GetProperty("endpoints").GetProperty("health").GetString());
+            Assert.False(root.TryGetProperty("archetype", out _));
+            AssertNoSnakeCaseKeys(root);
+        }
+
+        [Fact]
+        public async Task LegacyInstallCleanup_CopyNonDestructive_AndDescriptor_AlignWithMotherSuite()
+        {
+            var descriptor = Housekeeping.Installer.HousekeepingInstallerRunner.ResolveEffectiveDescriptor("0.2.0");
+            Assert.Equal("Housekeeping", descriptor.ProductName);
+            Assert.Equal("StreamItAll", descriptor.StudioName);
+            Assert.Equal("mother", descriptor.SuiteName, ignoreCase: true);
+            Assert.Equal(Path.Combine("StreamItAll", "Mother", "Housekeeping"), descriptor.UmbrellaSubpath);
+            Assert.True(descriptor.AllowLegacyMigration);
+
+            string legacyDir = Path.Combine(Path.GetTempPath(), "hk_legacy_src_" + Guid.NewGuid().ToString("N"));
+            string targetDir = Path.Combine(Path.GetTempPath(), "hk_suite_dst_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                Directory.CreateDirectory(legacyDir);
+                Directory.CreateDirectory(Path.Combine(targetDir, "data"));
+                File.WriteAllText(Path.Combine(legacyDir, "settings.json"), "{\"ConfigVersion\":4,\"Marker\":\"legacy\"}");
+                File.WriteAllText(Path.Combine(legacyDir, "history.json"), "[{\"Id\":\"h1\"}]");
+                File.WriteAllText(Path.Combine(targetDir, "data", "history.json"), "[{\"Id\":\"existing-target\"}]");
+
+                int copied = await Housekeeping.Installer.LegacyInstallCleanup.CopyLegacyStateNonDestructivelyAsync(legacyDir, targetDir, default);
+                Assert.True(copied >= 1);
+                Assert.True(File.Exists(Path.Combine(targetDir, "data", "settings.json")));
+                Assert.Contains("existing-target", File.ReadAllText(Path.Combine(targetDir, "data", "history.json")));
+            }
+            finally
+            {
+                TestCleanupHelper.TryDeleteDirectory(legacyDir);
+                TestCleanupHelper.TryDeleteDirectory(targetDir);
+            }
+        }
+
+        private static void AssertNoSnakeCaseKeys(JsonElement element)
+        {
+            if (element.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty prop in element.EnumerateObject())
+                {
+                    Assert.DoesNotContain('_', prop.Name);
+                    AssertNoSnakeCaseKeys(prop.Value);
+                }
+            }
+            else if (element.ValueKind == JsonValueKind.Array)
+            {
+                foreach (JsonElement item in element.EnumerateArray())
+                    AssertNoSnakeCaseKeys(item);
+            }
+        }
     }
 }

@@ -15,7 +15,7 @@ public static class HousekeepingLauncherArgsHelper
 {
     public static RootLauncherOptions CreateOptions() => new()
     {
-        ExtraSyncWaitFlags = ["--status", "--repair-config", "--doctor"],
+        ExtraSyncWaitFlags = ["--status", "--repair-config", "--doctor", "--managed-by-suite", "--managed-by-mother", "--automation-port", "--automation-token"],
         ExtraValueOptions = ["--bind", "--suite-id", "--automation-port", "--automation-token"]
     };
 
