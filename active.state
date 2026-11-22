@@ -17,8 +17,8 @@
   "isPublicRepo": true,
   "requireHumanReviewBeforePush": true,
   "tasklistDetailLevel": 3,
-  "openTaskCount": 14,
-  "completedTaskCount": 10,
+  "openTaskCount": 13,
+  "completedTaskCount": 11,
   "openReportCount": 0,
   "gates": {
     "isGate0ScopePassed": true,
@@ -37,6 +37,6 @@
     "secretEnvKey": "DISCORD_WEBHOOK_FOUNDATION",
     "autoPostOnRelease": true
   },
-  "notes": "Housekeeping v0.2.0 Public Beta built, audited (@dean Gate 2 PASS + @inspecter PASS), Two-Build Stage 2 4-Drive Sandbox E2E verified, SingleSetup7 signed bundle packaged (Releases\\v0.2.0 & Releases\\Latest), and cold Archive\\v0.2.0.7z created (awaiting human gate for git-filter-repo/push/prerelease). Next: v0.3.0 (Dual-Installer, Foundation.Sidecars/@foundation/ui, settings*.json/DPAPI, quarantine/SQLite WAL).",
-  "updatedAtUtc": "2026-11-20T12:46:00Z"
+  "notes": "Housekeeping v0.2.0 Public Beta shipped publicly on GitHub (scrubbed history via git-filter-repo, HealthPercent=100, GitHub Pages enabled, v0.2.0 --prerelease with 7 verified SingleSetup7 assets, cold Archive\\v0.2.0.7z, and Discord /post sent). Next: v0.3.0 (Dual-Installer, Foundation.Sidecars/@foundation/ui, settings*.json/DPAPI, quarantine/SQLite WAL).",
+  "updatedAtUtc": "2026-11-22T10:11:00Z"
 }
