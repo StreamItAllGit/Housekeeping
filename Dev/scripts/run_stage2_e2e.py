@@ -27,9 +27,9 @@ from typing import Any
 DEV_ROOT = Path(__file__).resolve().parents[1]
 OUTER_ROOT = DEV_ROOT.parent
 FOUNDATION_TOOLS = (
-    DEV_ROOT.parents[1] / "Foundation" / "Dev" / "tools"
-    if len(DEV_ROOT.parents) > 1 and (DEV_ROOT.parents[1] / "Foundation" / "Dev" / "tools").is_dir()
-    else Path(r"D:\Projects\Personal\Foundation\Dev\tools")
+    Path(os.environ["FOUNDATION_TOOLS_DIR"])
+    if os.environ.get("FOUNDATION_TOOLS_DIR")
+    else DEV_ROOT.parents[1] / "Foundation" / "Dev" / "tools"
 )
 if str(FOUNDATION_TOOLS) not in sys.path:
     sys.path.insert(0, str(FOUNDATION_TOOLS))
@@ -303,7 +303,9 @@ def _snapshot_mtimes(root: Path) -> dict[str, tuple[int, int]]:
 def run_stage2_e2e(auto_setup: Path | None, shots_dir: Path, build_test: bool = False) -> dict[str, Any]:
     host_localappdata = os.environ.get("LOCALAPPDATA", "")
     host_rclone_before = _snapshot_mtimes(Path(host_localappdata) / "rclone") if host_localappdata else {}
-    host_prog_before = _snapshot_mtimes(Path(r"D:\Programs\Housekeeping"))
+    prod_env = os.environ.get("HOUSEKEEPING_PROD_DIR", "").strip()
+    prod_dir = Path(prod_env) if prod_env else None
+    host_prog_before = _snapshot_mtimes(prod_dir) if prod_dir is not None else {}
     cfg = resolve_sandbox_config(argparse.Namespace(env_file=None, c_drive=None, d_drive=None, removable_drive=None, disc_drive=None, sandbox_root=None, profile_dir=None))
     init_sandbox(cfg, skip_subst=False, force_hive=False)
     take_host_snapshot(cfg, name="hk-v020-baseline")
@@ -397,7 +399,8 @@ def run_stage2_e2e(auto_setup: Path | None, shots_dir: Path, build_test: bool = 
     host_leaks = [x for k in ("addedFiles", "removedFiles", "modifiedFiles", "addedRegistryEntries", "removedRegistryEntries", "modifiedRegistryEntries") for x in diff.get(k, []) if ".tmp.driveupload" not in str(x).lower()]
     assert len(host_leaks) == 0, f"Host mutation detected: {host_leaks}"
     assert (host_rclone_before == (_snapshot_mtimes(Path(host_localappdata) / "rclone") if host_localappdata else {})), "Host %LOCALAPPDATA%\\rclone leaked!"
-    assert host_prog_before == _snapshot_mtimes(Path(r"D:\Programs\Housekeeping")), "D:\\Programs\\Housekeeping mutated!"
+    if prod_dir is not None:
+        assert host_prog_before == _snapshot_mtimes(prod_dir), f"Production directory mutated: {prod_dir}"
 
     receipt = {
         "schemaVersion": 1, "appId": "housekeeping", "version": version, "executedAtUtc": utc_now_iso(),

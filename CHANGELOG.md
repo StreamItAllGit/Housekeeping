@@ -8,7 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 ## [Unreleased]
+
 
+### Changed
+- **Workspace Hygiene (`/clean` -- 2026-11-20)**: purged 17.00 MB of disposable caches.
 ---
 
 ## [0.2.0] - 2026-11-20

@@ -27,6 +27,16 @@
     "isInspecterVerified": true,
     "isTessaSynced": true
   },
+  "discordPost": {
+    "isEnabled": true,
+    "serverName": null,
+    "guildId": null,
+    "channelName": null,
+    "channelId": null,
+    "deliveryMethod": "webhook",
+    "secretEnvKey": "DISCORD_WEBHOOK_FOUNDATION",
+    "autoPostOnRelease": true
+  },
   "notes": "Housekeeping v0.2.0 Public Beta built, audited (@dean Gate 2 PASS + @inspecter PASS), Two-Build Stage 2 4-Drive Sandbox E2E verified, SingleSetup7 signed bundle packaged (Releases\\v0.2.0 & Releases\\Latest), and cold Archive\\v0.2.0.7z created (awaiting human gate for git-filter-repo/push/prerelease). Next: v0.3.0 (Dual-Installer, Foundation.Sidecars/@foundation/ui, settings*.json/DPAPI, quarantine/SQLite WAL).",
   "updatedAtUtc": "2026-11-20T12:46:00Z"
 }

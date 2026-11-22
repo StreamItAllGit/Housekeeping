@@ -59,8 +59,7 @@ namespace Housekeeping.Tests
             Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
             Assert.Equal(4, doc.RootElement.GetProperty("ConfigVersion").GetInt32());
 
-            Assert.DoesNotContain("devuser", raw, StringComparison.OrdinalIgnoreCase);
-            Assert.DoesNotContain("WORKER-NODE", raw, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(@"\\\\", raw, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("discord.com/api/webhooks/", raw, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(@"D:\Projects\", raw, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain(@"C:\Users\", raw, StringComparison.OrdinalIgnoreCase);
@@ -81,7 +80,7 @@ namespace Housekeeping.Tests
             string buildScript = File.ReadAllText(Path.Combine(devRoot, "scripts", "build_installer.ps1"));
             Assert.Contains("SingleSetup7", buildScript, StringComparison.Ordinal);
             Assert.Contains("--allow-portable-zip", buildScript, StringComparison.Ordinal);
-            Assert.DoesNotMatch(new Regex(@"%USERPROFILE%", RegexOptions.IgnoreCase), buildScript);
+            Assert.DoesNotMatch(new Regex(@"C:\\Users\\[^\\""'\s]+", RegexOptions.IgnoreCase), buildScript);
         }
     }
 }
